@@ -25,7 +25,7 @@ import Test.HUnit
 ch x y z = (x .&. y) `xor` (complement x .&. z)
 maj x y z = (x .&. y) `xor` (x .&. z) `xor` (y .&. z)
 
-class (Bits w) => ShaData w where
+class (Num w, Bits w) => ShaData w where
   bigSigma0 :: w -> w
   bigSigma1 :: w -> w
   smallSigma0 :: w -> w
@@ -106,7 +106,7 @@ type Hash512 = Hash8 Word64
 data Hash384 = Hash384 !Word64 !Word64 !Word64 !Word64 !Word64 !Word64 deriving (Eq, Ord)
 data Hash224 = Hash224 !Word32 !Word32 !Word32 !Word32 !Word32 !Word32 !Word32 deriving (Eq, Ord)
 
-instance (Integral a) => Show (Hash8 a) where
+instance (Integral a, Show a) => Show (Hash8 a) where
  showsPrec _ (Hash8 a b c d e f g h) =
   (showHex a) . (' ':) .
   (showHex b) . (' ':) .
@@ -146,7 +146,7 @@ bitsToOctets x = helper (bitSize x) x []
      where
       bs = bitSize (head r)
 
-instance (Integral h, Bits h) => Hash (Hash8 h) where
+instance (Integral h, Bits h, Show h) => Hash (Hash8 h) where
   toOctets (Hash8 x0 x1 x2 x3 x4 x5 x6 x7) = bitsToOctets =<< [x0, x1, x2, x3, x4, x5, x6, x7]
 
 instance Hash Hash384 where

@@ -1,9 +1,9 @@
 Name:            Crypto
-Version:         4.2.1
+Version:         4.2.5.1
 License:         OtherLicense
 License-File:    ReadMe.tex
 Author:          Dominic Steinitz
-Maintainer:      Creighton Hogg <wchogg@gmail.com>
+Maintainer:      Caylee Hogg <caylee.hogg@gmail.com>
 Copyright:       Dominic Steinitz 2003 - 2007
 
 Stability:       Alpha
@@ -47,6 +47,7 @@ Library
                  Data.Digest.SHA512,
                  Data.LargeWord,
                  Data.HMAC
+        Build-Depends:  QuickCheck >= 2.4.0.1, HUnit
         if flag(small_base)
             Build-Depends: base >= 3, base < 5, array, random, pretty
         else

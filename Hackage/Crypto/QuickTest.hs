@@ -14,18 +14,6 @@ import Numeric
 import Data.Char
 import Test.QuickCheck
 
-instance Arbitrary Word8 where
-   arbitrary = 
-      do n <- choose ((fromIntegral (minBound::Word8))::Int, 
-                      (fromIntegral (maxBound::Word8))::Int)
-         return (fromIntegral n)
-
-instance Arbitrary Word64 where
-   arbitrary = 
-      do n <- choose ((fromIntegral (minBound::Word64))::Integer, 
-                      (fromIntegral (maxBound::Word64))::Integer)
-         return (fromIntegral n)
-
 instance Arbitrary Word128 where
    arbitrary = 
       do n <- choose ((fromIntegral (minBound::Word128))::Integer, 

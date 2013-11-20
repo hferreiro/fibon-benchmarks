@@ -27,30 +27,6 @@ checks = [
     ("Word256",
      quickCheck (\(w :: [Word256]) -> (listFromOctets . listToOctets) w == w))]
 
-instance Arbitrary Word8 where
-    arbitrary = do
-        let mx,mn :: Integer
-            mx = fromIntegral (maxBound :: Word8)
-            mn = fromIntegral (minBound :: Word8)
-        c <- choose (mx, mn)
-        return $ fromIntegral c
-
-instance Arbitrary Word32 where
-    arbitrary = do
-        let mx,mn :: Integer
-            mx = fromIntegral (maxBound :: Word32)
-            mn = fromIntegral (minBound :: Word32)
-        c <- choose (mx, mn)
-        return $ fromIntegral c
-
-instance Arbitrary Word64 where
-    arbitrary = do
-        let mx,mn :: Integer
-            mx = fromIntegral (maxBound :: Word64)
-            mn = fromIntegral (minBound :: Word64)
-        c <- choose (mx, mn)
-        return $ fromIntegral c
-
 instance Arbitrary Word128 where
         arbitrary = do
                 x <- vector (128 `div` 8) :: Gen [Word8]
