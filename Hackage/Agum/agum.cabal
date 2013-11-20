@@ -1,7 +1,7 @@
 Name:			agum
-Version:		2.3
+Version:		2.5
 Maintainer:		ramsdell@mitre.org
-Cabal-Version:		>= 1.2
+Cabal-Version:		>= 1.6
 License:		GPL
 License-File:		license.txt
 Synopsis:		Unification and Matching in an Abelian Group
@@ -20,7 +20,7 @@ Extra-Source-Files:	readme.txt ChangeLog Makefile
 
 Library
   Buildable: False
-  Build-Depends:	base >= 3 && < 5, containers
+  Build-Depends:	base >= 3 && < 5, containers >= 0.3
   Exposed-Modules:	Algebra.AbelianGroup.UnificationMatching
                         Algebra.AbelianGroup.IntLinEq
   Hs-Source-Dirs:	src
@@ -29,9 +29,13 @@ Library
 
 Executable Agum
   Main-Is:		Algebra/AbelianGroup/Main.hs
-  Build-Depends:	base >= 3 && < 5, containers, deepseq
+  Build-Depends:	base >= 3 && < 5, containers >= 0.3, deepseq
   Other-Modules:	Algebra.AbelianGroup.UnificationMatching
                         Algebra.AbelianGroup.IntLinEq
   Hs-Source-Dirs:	src ../../../../../tools/fibon-run
   GHC-Options:
     -Wall -fno-warn-name-shadowing -fwarn-unused-imports
+
+Source-Repository head
+  Type:			git
+  Location:		git://github.com/ramsdell/agum.git

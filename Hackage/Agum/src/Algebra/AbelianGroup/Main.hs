@@ -68,6 +68,7 @@ instance Monad AnsErr where
     fail          = Err
 
 -- Main loop
+
 main :: IO ()
 main = fibonMain oldmain
 
