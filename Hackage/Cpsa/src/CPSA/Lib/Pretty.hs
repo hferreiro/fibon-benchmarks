@@ -1,4 +1,4 @@
--- A simple pretty printer
+-- A simple pretty printer.
 
 -- The alogithm is by Lawrence C. Paulson, who simplified an algorithm
 -- by Derek C. Oppen.
@@ -58,11 +58,13 @@ brk :: Int -> Pretty
 brk = Brk
 
 -- Indentation blocks
+-- If the line is too long, not all breaks must be used
 blo :: Int -> [Pretty] -> Pretty
 blo indent es =
     Blo es indent (len es 0)
 
 -- Indentation groups
+-- If the line is too long, all breaks are used
 grp :: Int -> [Pretty] -> Pretty
 grp indent es =
     Grp es indent (len es 0)

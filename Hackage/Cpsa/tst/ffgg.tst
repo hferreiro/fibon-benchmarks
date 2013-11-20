@@ -1,5 +1,8 @@
-(comment "CPSA 2.1.0")
-(comment "All input read")
+(herald "The ffgg Protocol"
+  (comment "From A Necessarily Parallel Attack by Jon K. Millen"))
+
+(comment "CPSA 2.3.1")
+(comment "All input read from ffgg.scm")
 
 (defprotocol ffgg basic
   (defrole init
@@ -24,7 +27,9 @@
     ((send a) (recv (cat b n1 n2)) (send (cat a (enc n1 n2 m (pubk b))))
       (recv (cat n1 x (enc x y n1 (pubk b))))) ((recv m) (send m)))
   (label 0)
-  (unrealized (1 0)))
+  (unrealized (1 0))
+  (preskeleton)
+  (comment "Not a skeleton"))
 
 (defskeleton ffgg
   (vars (m n1 n2 x y text) (b a name))
@@ -39,6 +44,7 @@
   (label 1)
   (parent 0)
   (unrealized (1 0))
+  (origs (m (0 2)))
   (comment "1 in cohort - 1 not yet seen"))
 
 (defskeleton ffgg
@@ -98,7 +104,7 @@
     ((3 3) (1 0)))
   (non-orig (privk b))
   (uniq-orig m n1 n2 n2-0 n2-1)
-  (operation nonce-test (added-strand resp 4) m (3 2)
+  (operation nonce-test (displaced 4 2 resp 4) m (3 2)
     (enc n1 n2 m (pubk b)))
   (traces
     ((send a) (recv (cat b n1 n2)) (send (cat a (enc n1 n2 m (pubk b))))
@@ -112,6 +118,8 @@
   (label 4)
   (parent 3)
   (unrealized)
-  (shape))
+  (shape)
+  (maps ((0 1) ((b b) (m m) (a a) (n1 n1) (n2 n2) (x x) (y y))))
+  (origs (n1 (2 1)) (n2-0 (2 1)) (n2 (3 1)) (n2-1 (3 1)) (m (0 2))))
 
 (comment "Nothing left to do")

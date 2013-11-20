@@ -1,5 +1,5 @@
 \newcommand{\cpsa}{\textsc{cpsa}}
-\newcommand{\version}{2.0.6}
+\newcommand{\version}{2.3.1}
 \newcommand{\cpsacopying}{\begingroup
   \renewcommand{\thefootnote}{}\footnotetext{{\copyright} 2010 The
     MITRE Corporation.  Permission to copy without fee all or part of
@@ -11,22 +11,24 @@
 \newcommand{\pov}{\textsc{pov}}
 \newcommand{\cow}{\textsc{cow}}
 \newcommand{\cn}[1]{\ensuremath{\operatorname{\mathsf{#1}}}}
-\newcommand{\dom}[1]{\ensuremath{\operatorname{\mathrm{#1}}}}
+\newcommand{\dom}[1]{\ensuremath{\operatorname{\mathbf{#1}}}}
 \newcommand{\fn}[1]{\ensuremath{\operatorname{\mathit{#1}}}}
 \newcommand{\seq}[1]{\ensuremath{\langle#1\rangle}}
 \newcommand{\enc}[2]{\ensuremath{\{\!|#1|\!\}_{#2}}}
+\newcommand{\hash}[1]{\ensuremath{\##1}}
 \newcommand{\comp}[2]{{\mathord{#1}}\circ{\mathord{#2}}}
 \newcommand{\sembrack}[1]{[\![#1]\!]}
 \newcommand{\semfn}[1]{\mathcal{#1}}
 \newcommand{\sem}[2]{\semfn{#1}\sembrack{#2}}
 \newcommand{\mcsu}{\ensuremath{\mathcal{C}}}
 \newcommand{\probs}{\ensuremath{\mathcal{E}}}
+\newcommand{\srt}[1]{\ensuremath{\mathsf{#1}}}
 \newcommand{\eqq}{\stackrel{?}{=}}
 \newcommand{\inbnd}{\mathord -}
 \newcommand{\outbnd}{\mathord +}
 \newcommand{\nat}{\mathbb{N}}
-\newcommand{\all}[1]{\forall#1\mathpunct{.}}
-\newcommand{\some}[1]{\exists#1\mathpunct{.}}
+\newcommand{\all}[1]{\mathop{\forall#1}}
+\newcommand{\some}[1]{\mathop{\exists#1}}
 \newcommand{\baseterms}{\mathbb{B}}
 \newcommand{\cons}{\mathbin{::}}
 \newcommand{\ith}{\imath^\mathrm{th}}
@@ -46,8 +48,6 @@
 \newcommand{\alg}[1]{\ensuremath{\mathfrak#1}}
 \newcommand{\ops}[1]{\ensuremath{\mathbb#1}}
 \newcommand{\bundle}{\ensuremath{\mathcal{B}}}
-\newcommand{\nncow}[1]{\mathbin{\odot^{#1}}}
-\newcommand{\ncow}[1]{\mathbin{\dagger^{#1}}}
 \newcommand{\der}[3]{\ensuremath{\dctx{#2}{#3}\vdash#1}}
 \newcommand{\dctx}[2]{\ensuremath{#1:#2}}
 \newcommand{\flow}[3]{\ensuremath{#1,#2\rhd#3}}

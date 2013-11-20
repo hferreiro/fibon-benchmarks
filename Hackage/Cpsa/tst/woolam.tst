@@ -1,5 +1,7 @@
-(comment "CPSA 2.1.0")
-(comment "All input read")
+(herald "Woo-Lam Protocol")
+
+(comment "CPSA 2.3.1")
+(comment "All input read from woolam.scm")
 
 (defprotocol woolam basic
   (defrole init
@@ -29,6 +31,7 @@
       (recv (enc a n (ltk b s)))))
   (label 0)
   (unrealized (0 2) (0 4))
+  (origs (n (0 1)))
   (comment "1 in cohort - 1 not yet seen"))
 
 (defskeleton woolam
@@ -80,7 +83,7 @@
   (precedes ((0 1) (1 1)) ((0 3) (2 0)) ((1 2) (0 2)) ((2 1) (0 4)))
   (non-orig (ltk a s) (ltk b s))
   (uniq-orig n)
-  (operation encryption-test (added-strand resp 4)
+  (operation encryption-test (displaced 3 0 resp 4)
     (enc a (enc n (ltk a s)) (ltk b s)) (2 0))
   (traces
     ((recv a) (send n) (recv (enc n (ltk a s)))
@@ -92,6 +95,8 @@
   (label 3)
   (parent 2)
   (unrealized)
-  (shape))
+  (shape)
+  (maps ((0) ((a a) (s s) (b b) (n n))))
+  (origs (n (0 1))))
 
 (comment "Nothing left to do")

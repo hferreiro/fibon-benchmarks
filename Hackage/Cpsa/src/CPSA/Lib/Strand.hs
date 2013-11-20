@@ -1,4 +1,4 @@
--- Strand Space data structures
+-- Instance and preskeleton data structures and support functions.
 
 -- Copyright (c) 2009 The MITRE Corporation
 --
@@ -9,13 +9,13 @@
 module CPSA.Lib.Strand (Instance, mkInstance, bldInstance, mkListener,
     role, env, trace, height, listenerTerm, Sid, Node, mkPreskel,
     firstSkeleton, Pair, Preskel, gen, protocol, insts, orderings,
-    pov, knon, kunique, kcomment, nstrands, kvars, kterms, uniqOrig,
-    preskelWellFormed, verbosePreskelWellFormed, Strand, GraphStrand,
-    nodes, Vertex, GraphNode, preds, event, graphNode, strands, Gist,
-    gist, contract, augment, inheritRnon, inheritRunique, addListener,
-    Cause (..), Direction (..), Method (..), Operation (..),
-    operation, prob, homomorphism, toSkeleton, generalize, collapse)
-    where
+    pov, knon, kpnon, kunique, korig, kpriority, kcomment, nstrands, kvars,
+    strandids, kterms, uniqOrig, preskelWellFormed, verbosePreskelWellFormed,
+    Strand, inst, sid, nodes, Vertex, strand, pos, preds, event,
+    graphNode, strands, vertex, Gist, gist, isomorphic, contract, augment,
+    inheritRnon, inheritRpnon, inheritRunique, addListener, Cause
+    (..), Direction (..), Method (..), Operation (..), operation,
+    prob, homomorphism, toSkeleton, generalize, collapse) where
 
 import Control.Monad
 import qualified Data.List as L
@@ -30,7 +30,7 @@ import CPSA.Lib.Protocol
 {--
 import System.IO.Unsafe
 z :: Show a => a -> b -> b
-z x y = seq (unsafePerformIO (print x)) y
+z x y = unsafePerformIO (print x >> return y)
 
 zz :: Show a => a -> a
 zz x = z x x
@@ -51,7 +51,10 @@ zt :: Show a => a -> Bool -> Bool
 zt x True = z x True
 zt _ y = y
 
-zi :: Algebra t p g s e c => Instance t p g s e c -> String
+zl :: Show a => [a] -> [a]
+zl a = z (length a) a
+
+zi :: Algebra t p g s e c => Instance t e -> String
 zi inst =
     show (map f e)
     where
@@ -61,13 +64,44 @@ zi inst =
       f (x, t) = (displayTerm (context domain) x,
                   displayTerm (context range) t)
       context ts = addToContext emptyContext ts
+
+-- Also see showst
 --}
 
 -- Compile time switches for expermentation.
 
+-- Enable thinning, else use pruning.
+useThinning :: Bool
+useThinning = False -- True
+
+-- Do not do multistrand thinning.
+useSingleStrandThinning :: Bool
+useSingleStrandThinning = False -- True
+
+-- Enable de-origination.
+-- Don't use de-origination without thinning although you may want to
+-- use thinning without de-origination.
+useDeOrigination :: Bool
+useDeOrigination = useThinning -- False
+
 -- Sanity check: ensure no role variable occurs in a skeleton.
 useCheckVars :: Bool
 useCheckVars = False
+
+usePruningDuringCollapsing :: Bool
+usePruningDuringCollapsing = False -- True
+
+usePruningWhileSolving :: Bool
+usePruningWhileSolving = True -- False
+
+useStrictPrecedesCheck :: Bool
+useStrictPrecedesCheck = False -- True
+
+usePruningUnboundCheck :: Bool
+usePruningUnboundCheck = False -- True
+
+useNoOrigPreservation :: Bool
+useNoOrigPreservation = False -- True
 
 -- Instances and Strand Identifiers
 
@@ -83,15 +117,15 @@ useCheckVars = False
 
 type Sid = Int                  -- Strand Identifier
 
-data Algebra t p g s e c => Instance t p g s e c = Instance
-    { role :: Role t p g s e c, -- Role from which this was
+data Instance t e = Instance
+    { role :: Role t, -- Role from which this was
                                 -- instantiated
 
       env :: !e,                -- The environment used to build this
                                 -- instance's trace from its role's
                                 -- trace
 
-      trace :: ![Event t p g s e c], -- Instance's trace
+      trace :: ![Event t], -- Instance's trace
 
       height :: !Int }          -- Height of the instance
     deriving Show
@@ -100,8 +134,8 @@ data Algebra t p g s e c => Instance t p g s e c = Instance
 -- specifies how to map some variables in the role's trace.  Unmapped
 -- variables are instantiated with fresh variables to avoid naming
 -- conflicts.
-mkInstance :: Algebra t p g s e c => g -> Role t p g s e c ->
-              e -> Int -> (g, Instance t p g s e c)
+mkInstance :: Algebra t p g s e c => g -> Role t ->
+              e -> Int -> (g, Instance t e)
 mkInstance gen role env height =
     let trace = rtrace role
         rheight = length trace in
@@ -113,8 +147,8 @@ mkInstance gen role env height =
         -- Ensure every variable in the range of the environment
         -- occurs in the trace.
         case bldInstance role trace' gen' of
-          Nothing -> error "Strand.mkInstance: Not an instance"
-          Just (gen'', inst) -> (gen'', inst)
+          (gen'', inst) : _ -> (gen'', inst)
+          [] -> error "Strand.mkInstance: Not an instance"
 
 -- For each term that matches itself in the environment, extend the
 -- mapping so that the term maps to one with a fresh set of variables.
@@ -124,43 +158,48 @@ grow :: Algebra t p g s e c => [t] -> g -> e -> (g, e)
 grow [] gen env = (gen, env)
 grow (t : ts) gen env =
     case match t t (gen, env) of
-      Nothing -> grow ts gen env -- Term already mapped
-      Just _ ->                  -- Otherwise make a fresh mapping
+      [] -> grow ts gen env     -- Term already mapped
+      _ ->                      -- Otherwise make a fresh mapping
           let (gen', t') = clone gen t in
           case match t t' (gen', env) of
-            Nothing -> error "Strand.grow: Internal error"
-            Just (gen'', env') -> grow ts gen'' env'
+            (gen'', env') : _ -> grow ts gen'' env'
+            [] -> error "Strand.grow: Internal error"
 
--- Build an instance from a role and a trace.  Returns Nothing if the
--- trace is not an instance of the given role.
-bldInstance :: Algebra t p g s e c => Role t p g s e c ->
-               Trace t p g s e c -> g -> Maybe (g, Instance t p g s e c)
+-- Build an instance from a role and a trace.  Returns the empty list
+-- if the trace is not an instance of the given role.
+bldInstance :: Algebra t p g s e c => Role t ->
+               Trace t -> g -> [(g, Instance t e)]
 bldInstance _ [] _ = error "Strand.bldInstance: Bad trace"
 bldInstance role trace gen =
     loop (rtrace role) trace (gen, emptyEnv) -- Loop builds env
     where
       loop _ [] (gen, env) =        -- Trace can be shorter than role's trace
-          Just (gen, makeInstance role env trace)
+          [(gen, makeInstance role env trace)]
       loop (In t : c) (In t' : c') ge =
-          maybe Nothing (loop c c') (match t t' ge)
+          do
+            env <- match t t' ge
+            loop c c' env
       loop (Out t : c) (Out t' : c') ge =
-          maybe Nothing (loop c c') (match t t' ge)
-      loop _ _ _ = Nothing
+          do
+            env <- match t t' ge
+            loop c c' env
+      loop _ _ _ = []
 
-makeInstance :: Algebra t p g s e c => Role t p g s e c -> e ->
-                Trace t p g s e c -> Instance t p g s e c
+makeInstance :: Algebra t p g s e c => Role t -> e ->
+                Trace t -> Instance t e
 makeInstance role env trace =
     Instance { role = role,
-               env = env,
+               env = specialize env,
                trace = trace,
                height = length trace }
 
 -- This is the only place a role is generated with an empty name.
 -- This is what marks a strand as a listener.
 mkListener :: Algebra t p g s e c => g -> t ->
-              (g, Instance t p g s e c)
+              (g, Instance t e)
 mkListener gen term =
-    (gen'', Instance { role = mkRole "" vars [In rterm, Out rterm] [] [] [],
+    (gen'', Instance { role = mkRole "" vars [In rterm, Out rterm]
+                              [] [] [] [] [] False,
                        env = env,
                        trace = [In term, Out term],
                        height = 2 })
@@ -169,16 +208,22 @@ mkListener gen term =
       vars = addVars [] rterm        -- Collect vars in role term
       (gen'', env) =
           case match rterm term (gen', emptyEnv) of
-            Nothing -> error msg
-            Just (gen'', env) -> (gen'', env)
+            (gen'', env) : _ -> (gen'', env)
+            [] -> error msg
       msg = "Strand.mkListener: cannot generate an environment."
 
-listenerTerm :: Algebra t p g s e c => Instance t p g s e c -> Maybe t
+-- Add to set s the variables that are in the range of instance i
+addIvars :: Algebra t p g s e c => Set t -> Instance t e -> Set t
+addIvars s i =
+    foldl g s (reify (rvars (role i)) (env i))
+    where
+      g s (_, t) = foldVars (flip S.insert) s t
+
+listenerTerm :: Algebra t p g s e c => Instance t e -> Maybe t
 listenerTerm inst =
-    if "" /= rname (role inst) then
-        Nothing                 -- Not a listener strand
-    else
-        Just $ evtTerm (trace inst !! 0)
+    case rname (role inst) of
+      "" -> Just $ evtTerm (trace inst !! 0) -- Get first term in trace
+      _ -> Nothing              -- Not a listener strand
 
 -- Nodes, Pairs, and Graphs
 
@@ -229,9 +274,9 @@ instance Ord (GraphNode e i) where
     compare n0 n1 = compare (strand n0, pos n0) (strand n1, pos n1)
 
 instance Show (GraphNode e i) where
-    showsPrec _ n = let (s, p) = graphNode n in
+    showsPrec _ n = let (s, i') = graphNode n in
                     showChar '(' . shows s . showString ", " .
-                    shows p . showChar ')'
+                    shows i' . showChar ')'
 
 -- The node of a vertex
 graphNode :: GraphNode e i -> Node
@@ -268,12 +313,12 @@ graph trace height insts pairs =
                   pos <- nats (height (inst strand)) ] |
                 (sid, strand) <- zip [0..] strands ]
       preds n = map getNode (entry n)
-      getNode (s, p) = nodes !! s !! p
+      getNode (s, i) = nodes !! s !! i
       getEdge (n0, n1) = (getNode n0, getNode n1)
       entry n = enrich n [ n0 | (n0, n1) <- pairs, n1 == n ]
       -- add strand succession edges
-      enrich (s, p) ns
-          | p > 0 = (s, p - 1) : ns
+      enrich (s, i) ns
+          | i > 0 = (s, i - 1) : ns
           | otherwise = ns
 
 -- Does start node precede end node?
@@ -314,29 +359,31 @@ graphClose orderings =
           | otherwise = inner (p : orderings) True pairs rest
       sameStrands (n0, n1) = strand n0 == strand n1
 
--- Preskeltons
+-- Preskeletons
 
-data Algebra t p g s e c => Preskel t p g s e c = Preskel
+data Preskel t g s e = Preskel
     { gen :: !g,
-      protocol :: Prot t p g s e c,
-      insts :: ![Instance t p g s e c],
-      strands :: ![Strand t p g s e c],
+      protocol :: Prot t g,
+      insts :: ![Instance t e],
+      strands :: ![Strand t e],
       orderings :: ![Pair],
-      edges :: ![Edge t p g s e c],
+      edges :: ![Edge t e],
       knon :: ![t],             -- A list of atoms
+      kpnon :: ![t],            -- A list of atoms
       kunique :: ![t],          -- A list of atoms
+      kpriority :: [(Node, Int)], -- Override node priority
       kcomment :: [SExpr ()],   -- Comments from the input
       korig :: ![(t, [Node])],  -- This is an association list with a
                                 -- pair for each element of kunique.
                                 -- The value associated with a term
                                 -- is a list of the nodes at which it
                                 -- originates--the term's provenance.
-      pov :: Maybe (Preskel t p g s e c), -- Point of view, the
+      pov :: Maybe (Preskel t g s e), -- Point of view, the
                                           -- original problem statement.
       strandids :: ![Sid],
       tc :: [Pair],             -- Transitive closure of orderings
                                 -- Used only during generalization
-      operation :: Operation t p g s e c,
+      operation :: Operation t s,
       prob :: [Sid] }        -- A map from the strands in the original
     deriving Show               -- problem statement, the pov, into
                                 -- these strands.
@@ -344,25 +391,25 @@ data Algebra t p g s e c => Preskel t p g s e c = Preskel
 -- The pov skeleton is the only skeleton that should have Nothing in
 -- its pov field.
 
-type Strand t p g s e c
-    = GraphStrand (Event t p g s e c) (Instance t p g s e c)
+type Strand t e
+    = GraphStrand (Event t) (Instance t e)
 
-type Vertex t p g s e c
-    = GraphNode (Event t p g s e c) (Instance t p g s e c)
+type Vertex t e
+    = GraphNode (Event t) (Instance t e)
 
-type Edge t p g s e c
-    = GraphEdge (Event t p g s e c) (Instance t p g s e c)
+type Edge t e
+    = GraphEdge (Event t) (Instance t e)
 
 -- Data structure for tracking the causes for the creation of
 -- preskeletons.
 
-data Algebra t p g s e c => Cause t p g s e c
+data Cause t
     = Cause Direction Node t (Set t)
     deriving Show
 
 data Direction = Encryption | Nonce deriving Show
 
-data Algebra t p g s e c => Method t p g s e c
+data Method t
     = Deleted Node
     | Weakened Pair
     | Separated t
@@ -372,41 +419,42 @@ data Algebra t p g s e c => Method t p g s e c
 -- the loader, a contraction, a regular augmentation, a listener
 -- augmentation, or a mininization.  The augmentation includes a role
 -- name and instance height.
-data Algebra t p g s e c => Operation t p g s e c
+data Operation t s
     = New
-    | Contracted s (Cause t p g s e c)
-    | Displaced Int Int String Int (Cause t p g s e c)
-    | AddedStrand String Int (Cause t p g s e c)
-    | AddedListener t (Cause t p g s e c)
-    | Generalized (Method t p g s e c)
+    | Contracted s (Cause t)
+    | Displaced Int Int String Int (Cause t)
+    | AddedStrand String Int (Cause t)
+    | AddedListener t (Cause t)
+    | Generalized (Method t)
     | Collapsed Int Int
       deriving Show
 
 -- Create a preskeleton.  The point of view field is not filled in.
 -- This version is exported for use by the loader.  This preskeleton
 -- must be consumed by firstSkeleton.
-mkPreskel :: Algebra t p g s e c => g -> Prot t p g s e c ->
-             [Instance t p g s e c] -> [Pair] -> [t] -> [t] ->
-             [SExpr ()] -> Preskel t p g s e c
-mkPreskel gen protocol insts orderings non unique comment =
+mkPreskel :: Algebra t p g s e c => g -> Prot t g ->
+             [Instance t e] -> [Pair] -> [t] -> [t] -> [t] ->
+             [(Node, Int)] -> [SExpr ()] -> Preskel t g s e
+mkPreskel gen protocol insts orderings non pnon unique prio comment =
     k { kcomment = comment }
     where
-      k = newPreskel gen protocol insts orderings non unique New prob Nothing
+      k = newPreskel gen protocol insts orderings non pnon
+          unique prio New prob Nothing
       prob = strandids k        -- Fixed point on k is okay.
 
 -- Strand functions
 
-strandInst :: Algebra t p g s e c => Preskel t p g s e c ->
-              Sid -> Instance t p g s e c
+strandInst :: Algebra t p g s e c => Preskel t g s e ->
+              Sid -> Instance t e
 strandInst k strand = insts k !! strand
 
-nstrands :: Algebra t p g s e c => Preskel t p g s e c -> Int
+nstrands :: Algebra t p g s e c => Preskel t g s e -> Int
 nstrands k = length (strandids k)
 
 -- Convert the preskeleton made by the loader into the first skeleton
 -- used in the search.
-firstSkeleton :: Algebra t p g s e c => Preskel t p g s e c ->
-                 Maybe (Preskel t p g s e c)
+firstSkeleton :: Algebra t p g s e c => Preskel t g s e ->
+                 [Preskel t g s e]
 firstSkeleton k =
     do
       k <- wellFormedPreskel k
@@ -417,11 +465,11 @@ firstSkeleton k =
 -- preds field of each instance in this function.  The maybe uniquely
 -- originating term data is also filled in.  This version is used
 -- within this module.
-newPreskel :: Algebra t p g s e c => g -> Prot t p g s e c ->
-             [Instance t p g s e c] -> [Pair] -> [t] -> [t] ->
-             Operation t p g s e c -> [Sid] ->
-             Maybe (Preskel t p g s e c) -> Preskel t p g s e c
-newPreskel gen protocol insts orderings non unique oper prob pov =
+newPreskel :: Algebra t p g s e c => g -> Prot t g ->
+             [Instance t e] -> [Pair] -> [t] -> [t] -> [t] ->
+             [(Node, Int)] -> Operation t s -> [Sid] ->
+             Maybe (Preskel t g s e) -> Preskel t g s e
+newPreskel gen protocol insts orderings non pnon unique prio oper prob pov =
     let orderings' = L.nub orderings
         unique' = L.nub unique
         g = graph trace height insts orderings'
@@ -436,7 +484,9 @@ newPreskel gen protocol insts orderings non unique oper prob pov =
                       orderings = orderings',
                       edges = edges,
                       knon = L.nub non,
+                      kpnon = L.nub pnon,
                       kunique = unique',
+                      kpriority = prio,
                       kcomment = [],
                       korig = orig,
                       tc = map graphPair tc,
@@ -448,8 +498,8 @@ newPreskel gen protocol insts orderings non unique oper prob pov =
             checkVars k
         else k
 
-checkVars :: Algebra t p g s e c => Preskel t p g s e c ->
-             Preskel t p g s e c
+checkVars :: Algebra t p g s e c => Preskel t g s e ->
+             Preskel t g s e
 checkVars k =
     foldl f k rolevars
     where
@@ -460,35 +510,37 @@ checkVars k =
             error ("Strand.checkVars: role var in skel " ++ show k)
         | otherwise = k
 
-vertex  :: Algebra t p g s e c => Preskel t p g s e c -> Node ->
-           Vertex t p g s e c
-vertex k (s, p) =
-    nodes (strands k !! s) !! p
+vertex  :: Algebra t p g s e c => Preskel t g s e -> Node ->
+           Vertex t e
+vertex k (s, i) =
+    nodes (strands k !! s) !! i
 
-originationNodes :: Algebra t p g s e c => [Strand t p g s e c] ->
+originationNodes :: Algebra t p g s e c => [Strand t e] ->
                     t -> (t, [Node])
 originationNodes strands u =
     (u, [ (sid strand, p) |
           strand <- reverse strands,
           p <- M.maybeToList $ originationPos u (trace (inst strand)) ])
 
-uniqOrig :: Algebra t p g s e c => Preskel t p g s e c -> [t]
+uniqOrig :: Algebra t p g s e c => Preskel t g s e -> [t]
 uniqOrig k =
     do
       (t, [_]) <- reverse (korig k)
       return t
 
 -- A preskeleton is well formed if the ordering relation is acyclic,
--- each atom declared to be uniquely-originating is carried in
--- some preskeleton term, and every variable that occurs in each base
--- term declared to be non-originating occurs in some preskeleton
--- term, and the atom must never be carried by any term, and
--- every uniquely originating role term mapped by an instance is
--- mapped to a term that originates on the instance's strand.
+-- each atom declared to be uniquely-originating is carried in some
+-- preskeleton term, and every variable that occurs in each base term
+-- declared to be non-originating or pen-non-originating occurs in
+-- some preskeleton term, and the atom must never be carried by any
+-- term, and every uniquely originating role term mapped by an
+-- instance is mapped to a term that originates on the instance's
+-- strand.
 
-preskelWellFormed :: Algebra t p g s e c => Preskel t p g s e c -> Bool
+preskelWellFormed :: Algebra t p g s e c => Preskel t g s e -> Bool
 preskelWellFormed k =
     varSubset (knon k) terms &&
+    varSubset (kpnon k) terms &&
     all nonCheck (knon k) &&
     all uniqueCheck (kunique k) &&
     wellOrdered k && acyclicOrder k &&
@@ -499,19 +551,22 @@ preskelWellFormed k =
       uniqueCheck t = any (carriedBy t) terms
 
 -- Do notation friendly preskeleton well formed check.
-wellFormedPreskel :: Algebra t p g s e c => Preskel t p g s e c ->
-                     Maybe (Preskel t p g s e c)
-wellFormedPreskel k =
-    assert preskelWellFormed k
+wellFormedPreskel :: (Monad m, Algebra t p g s e c) =>
+                     Preskel t g s e -> m (Preskel t g s e)
+wellFormedPreskel k
+    | preskelWellFormed k = return k
+    | otherwise = fail "preskeleton not well formed"
 
 -- A version of preskelWellFormed that explains why a preskeleton is
 -- not well formed.
 verbosePreskelWellFormed :: (Monad m, Algebra t p g s e c) =>
-                            Preskel t p g s e c -> m ()
+                            Preskel t g s e -> m ()
 verbosePreskelWellFormed k =
     do
       failwith "a variable in non-orig is not in some trace"
                    $ varSubset (knon k) terms
+      failwith "a variable in pen-non-orig is not in some trace"
+                   $ varSubset (kpnon k) terms
       mapM_ nonCheck $ knon k
       mapM_ uniqueCheck $ kunique k
       failwith "ordered pairs not well formed" $ wellOrdered k
@@ -538,11 +593,11 @@ showst t =
     shows $ displayTerm (addToContext emptyContext [t]) t
 
 -- Do the nodes in the orderings have the right direction?
-wellOrdered :: Algebra t p g s e c => Preskel t p g s e c -> Bool
+wellOrdered :: Algebra t p g s e c => Preskel t g s e -> Bool
 wellOrdered k =
     all pairWellOrdered (edges k)
 
-pairWellOrdered :: Algebra t p g s e c => Edge t p g s e c -> Bool
+pairWellOrdered :: Algebra t p g s e c => Edge t e -> Bool
 pairWellOrdered (n0, n1) =
     case (event n0, event n1) of
       (Out _, In _) -> True
@@ -550,11 +605,11 @@ pairWellOrdered (n0, n1) =
 
 -- The terms used in the strands in this preskeleton.
 -- Should this return a set, or a multiset?
-kterms :: Algebra t p g s e c => Preskel t p g s e c -> [t]
+kterms :: Algebra t p g s e c => Preskel t g s e -> [t]
 kterms k = iterms (insts k)
 
 -- The terms used in a list of instances.
-iterms :: Algebra t p g s e c => [Instance t p g s e c] -> [t]
+iterms :: Algebra t p g s e c => [Instance t e] -> [t]
 iterms insts =
     foldl addSTerms [] insts
     where
@@ -565,7 +620,7 @@ iterms insts =
 -- Use depth first search to detect cycles.  A graph with no node with
 -- an indegree of zero is cyclic and must not be checked with depth
 -- first search.
-acyclicOrder :: Algebra t p g s e c => Preskel t p g s e c -> Bool
+acyclicOrder :: Algebra t p g s e c => Preskel t g s e -> Bool
 acyclicOrder k =
     all (not . backEdge numbering) edges
     where
@@ -578,16 +633,13 @@ acyclicOrder k =
 
 -- Variables in this preskeleton, excluding ones in roles, and ones
 -- that only occur in a cause.
-kvars :: Algebra t p g s e c => Preskel t p g s e c -> [t]
+kvars :: Algebra t p g s e c => Preskel t g s e -> [t]
 kvars k =
-    S.elems $ foldl f S.empty (insts k)
-    where
-      f s i = foldl g s (reify (rvars (role i)) (env i))
-      g s (_, t) = foldVars (flip S.insert) s t
+    S.elems $ foldl addIvars S.empty (insts k)
 
 -- Ensure each role unique origination assumption mapped by an
 -- instance originates in the instance's strand.
-roleOrigCheck :: Algebra t p g s e c => Preskel t p g s e c -> Bool
+roleOrigCheck :: Algebra t p g s e c => Preskel t g s e -> Bool
 roleOrigCheck k =
     all strandRoleOrig (strands k) -- Check each strand
     where
@@ -597,7 +649,7 @@ roleOrigCheck k =
           | pos < height (inst strand) =
               case lookup (instantiate (env $ inst strand) ru) (korig k) of
                 Nothing -> True     -- role term not mapped
-                Just ns -> any (\(s, p)-> sid strand == s && p == pos) ns
+                Just ns -> any (\(s, i)-> sid strand == s && i == pos) ns
           | otherwise = True
 
 -- Isomorphism Check
@@ -620,36 +672,41 @@ roleOrigCheck k =
 -- frequently, so an specialized data structure is used.  The gist of
 -- a skeleton is all that is needed for the test for equivalence.
 
-data Algebra t p g s e c => Gist t p g s e c = Gist
+data Gist t g = Gist
     { ggen :: g,
-      gtraces :: [(Int, Trace t p g s e c)],
+      gtraces :: [(Int, Trace t)],
       gorderings :: [Pair],
       gnon :: [t],             -- A list of non-originating terms
+      gpnon :: [t],      -- A list of penetrator non-originating terms
       gunique :: [t],          -- A list of uniquely-originating terms
       nvars :: !Int,           -- Number of variables
       ntraces :: !Int,         -- Number of traces
       norderings :: !Int,      -- Number of orderings
       nnon :: !Int,            -- Number of non-originating terms
+      npnon :: !Int,     -- Number of penetrator non-originating terms
       nunique :: !Int }        -- Number of uniquely-originating terms
     deriving Show
 
-gist :: Algebra t p g s e c => Preskel t p g s e c ->
-        Gist t p g s e c
+gist :: Algebra t p g s e c => Preskel t g s e ->
+        Gist t g
 gist k =
     Gist { ggen = gen k,
            gtraces = gtraces,
            gorderings = gorderings,
            gnon = gnon,
+           gpnon = gpnon,
            gunique = gunique,
            nvars = length (kvars k),
            ntraces = length gtraces,
            norderings = length gorderings,
            nnon = length gnon,
+           npnon = length gpnon,
            nunique = length gunique }
     where
       gtraces = map (\i -> (height i, trace i)) (insts k)
       gorderings = orderings k
       gnon = knon k
+      gpnon = kpnon k
       gunique = kunique k
 
 -- Test to see if two preskeletons are isomorphic
@@ -671,23 +728,21 @@ gist k =
 -- appropriate one in the other preskeleton.  Finally, check to see if
 -- the renaming works in the nr and ur terms.
 
-instance Algebra t p g s e c => Eq (Gist t p g s e c) where
-    g == g' = isomorphic g g'
-
-isomorphic :: Algebra t p g s e c => Gist t p g s e c ->
-              Gist t p g s e c -> Bool
+isomorphic :: Algebra t p g s e c => Gist t g ->
+              Gist t g -> Bool
 isomorphic g g' =
     nvars g == nvars g' &&
     ntraces g == ntraces g' &&
     norderings g == norderings g' &&
     nnon g == nnon g' &&
+    npnon g == npnon g' &&
     nunique g == nunique g' &&
     any (tryPerm g g') (permutations g g')
 
 -- Extend a permutation while extending a substitution
 -- Extend by matching later strands first
-permutations :: Algebra t p g s e c => Gist t p g s e c ->
-                Gist t p g s e c -> [((g, e), [Sid])]
+permutations :: Algebra t p g s e c => Gist t g ->
+                Gist t g -> [((g, e), [Sid])]
 permutations g g' =
     map rev $ perms (ggen g', emptyEnv)
                     (reverse $ gtraces g)
@@ -699,20 +754,24 @@ permutations g g' =
             x <- xs,
             let (h', c') = gtraces g' !! x,
             h == h',
-            env' <- M.maybeToList $ jibeTraces c c' env,
+            env' <- jibeTraces c c' env,
             (env'', ys) <- perms env' hcs (L.delete x xs) ]
       perms _ _ _ = error "Strand.permutations: lists not same length"
       rev (env, xs) = (env, reverse xs)
 
 -- Length of matched traces must agree.
-jibeTraces :: Algebra t p g s e c => Trace t p g s e c ->
-              Trace t p g s e c -> (g, e) -> Maybe (g, e)
-jibeTraces [] [] ge = Just ge
+jibeTraces :: Algebra t p g s e c => Trace t ->
+              Trace t -> (g, e) -> [(g, e)]
+jibeTraces [] [] ge = [ge]
 jibeTraces (In t : c) (In t' : c') ge =
-    maybe Nothing (jibeTraces c c') (match t t' ge)
+    do
+      env <- match t t' ge
+      jibeTraces c c' env
 jibeTraces (Out t : c) (Out t' : c') ge =
-    maybe Nothing (jibeTraces c c') (match t t' ge)
-jibeTraces _ _ _ = Nothing
+    do
+      env <- match t t' ge
+      jibeTraces c c' env
+jibeTraces _ _ _ = []
 
 {-
 -- Here is the permutation algorithm used
@@ -739,8 +798,8 @@ permutations n =
       interleave x (y:ys) = (x:y:ys) : map (y:) (interleave x ys)
 -}
 
-tryPerm :: Algebra t p g s e c => Gist t p g s e c ->
-           Gist t p g s e c -> ((g, e), [Sid]) -> Bool
+tryPerm :: Algebra t p g s e c => Gist t g ->
+           Gist t g -> ((g, e), [Sid]) -> Bool
 tryPerm g g' (env, perm) =
     checkOrigs g g' env &&
     containsMapped (permutePair perm) (gorderings g') (gorderings g)
@@ -757,53 +816,64 @@ permutePair perm (n, n') = (permuteNode perm n, permuteNode perm n')
 permuteNode :: [Sid] -> Node -> Node
 permuteNode perm (strand, pos) = (perm !! strand, pos)
 
-checkOrigs :: Algebra t p g s e c => Gist t p g s e c ->
-              Gist t p g s e c -> (g, e) -> Bool
+checkOrigs :: Algebra t p g s e c => Gist t g ->
+              Gist t g -> (g, e) -> Bool
 checkOrigs g g' env =
     not (null
-         [ env'' |
+         [ env''' |
            env' <- checkOrig env (gnon g) (gnon g'),
-           env'' <- checkOrig env' (gunique g) (gunique g'),
-           matchRenaming env'' ])
+           env'' <- checkOrig env' (gpnon g) (gpnon g'),
+           env''' <- checkOrig env'' (gunique g) (gunique g'),
+           matchRenaming env''' ])
 
 -- Try all permutations as done above
 checkOrig :: Algebra t p g s e c => (g, e) -> [t] -> [t] -> [(g, e)]
 checkOrig env [] [] = [env]
 checkOrig env (t:ts) ts' =
-    [ env'' |
-      t' <- ts',
-      env' <- M.maybeToList $ match t t' env,
-      env'' <- checkOrig env' ts (L.delete t' ts') ]
+    do
+      t' <- ts'
+      env' <- match t t' env
+      checkOrig env' ts (L.delete t' ts')
 checkOrig _ _ _ = error "Strand.checkOrig: lists not same length"
 
 -- Preskeleton Reduction System (PRS)
 
--- The PRS reduces a preskeleton to skeleton or fails.  Along the way,
+-- The PRS reduces a preskeleton to a list of skeletons.  Along the way,
 -- it applies the associtated homomorphism to a node and computes a
--- substitution.  Thus if skel (k, n, empty) = Just (k', n', sigma), then
--- pi,sigma is a homomorphism from k to k', n' = pi(n).
+-- substitution.  Thus if skel (k, n, empty) = [(k', n', sigma)], then
+-- phi,sigma is a homomorphism from k to k', n' = phi(n).
 
-type PRS t p g s e c = (Preskel t p g s e c, Node, s)
+type PRS t p g s e c = (Preskel t g s e, -- Parent
+                        Preskel t g s e, -- Potential cohort member
+                        Node,   -- Image of test node in member
+                        [Sid],  -- Strand map part of homomorphism
+                        s)      -- Substition part of homomorphism
 
--- Returns the preskeleton that results from applying a substitution
--- or nothing if fails to preserve the nodes at which each maybe
--- uniquely originating term originates, or produces a strand that is
--- not an instance of its role.
+-- Extract the protential cohort member from a PRS.
+skel :: Algebra t p g s e c => PRS t p g s e c -> Preskel t g s e
+skel (_, k, _, _, _) = k
 
-ksubst :: Algebra t p g s e c => PRS t p g s e c ->
-          (g, s) -> Maybe (PRS t p g s e c)
-ksubst (k, n, hsubst) (gen, subst) =
+-- Returns the preskeletons that result from applying a substitution.
+-- If validate is True, preskeletons that fail to preserve the nodes
+-- at which each maybe uniquely originating term originates are filter
+-- out.
+
+ksubst :: Algebra t p g s e c => Bool -> PRS t p g s e c ->
+          (g, s) -> [PRS t p g s e c]
+ksubst validate (k0, k, n, phi, hsubst) (gen, subst) =
     do
       (gen', insts') <- foldMapM (substInst subst) gen (insts k)
       let non' = map (substitute subst) (knon k)
+      let pnon' = map (substitute subst) (kpnon k)
       let unique' = map (substitute subst) (kunique k)
       let operation' = substOper subst (operation k)
       let k' = newPreskel gen' (protocol k) insts'
-               (orderings k) non' unique' operation' (prob k) (pov k)
+               (orderings k) non' pnon' unique' (kpriority k)
+               operation' (prob k) (pov k)
       k' <- wellFormedPreskel k'
-      case validateSubst k subst k' of
-        True -> return (k', n, compose subst hsubst)
-        False -> Nothing
+      case not validate || validateMappingSubst k0 phi subst k' of
+        True -> return (k0, k', n, phi, compose subst hsubst)
+        False -> fail ""
 
 -- Monad version of mapAccumR
 foldMapM :: Monad m => (a -> b -> m (a, c)) -> a -> [b] -> m (a, [c])
@@ -814,14 +884,14 @@ foldMapM f acc (x:xs) =
       (acc'', x') <- f acc' x
       return (acc'', x':xs')
 
-substInst :: Algebra t p g s e c => s -> g -> Instance t p g s e c ->
-             Maybe (g, Instance t p g s e c)
+substInst :: Algebra t p g s e c => s -> g -> Instance t e ->
+             [(g, Instance t e)]
 substInst subst gen i =
     bldInstance (role i) (map (evtMap $ substitute subst) (trace i)) gen
 
 substOper :: Algebra t p g s e c => s ->
-             Operation t p g s e c ->
-             Operation t p g s e c
+             Operation t s ->
+             Operation t s
 substOper _ New = New
 substOper subst (Contracted s cause) =
     Contracted (compose subst s) (substCause subst cause)
@@ -834,29 +904,19 @@ substOper _ m@(Generalized _) = m
 substOper _ m@(Collapsed _ _) = m
 
 substCause :: Algebra t p g s e c => s ->
-              Cause t p g s e c ->
-              Cause t p g s e c
+              Cause t ->
+              Cause t
 substCause subst (Cause dir n t escape) =
     Cause dir n (substitute subst t) (S.map (substitute subst) escape)
 
--- Ensure origination nodes a preserved as required to be a homomorphism
-validateSubst :: Algebra t p g s e c => Preskel t p g s e c ->
-                 s -> Preskel t p g s e c -> Bool
-validateSubst k subst k' =
-    all check (korig k)
-    where
-      check (u, ns) =
-          case lookup (substitute subst u) (korig k') of
-            Nothing -> False
-            Just ns' -> all (flip elem ns') ns
-
 -- A compression (s is to be eliminated)
-compress :: Algebra t p g s e c => PRS t p g s e c ->
-            Sid -> Sid -> Maybe (PRS t p g s e c)
-compress (k, n, hsubst) s s' =
+compress :: Algebra t p g s e c => Bool -> PRS t p g s e c ->
+            Sid -> Sid -> [PRS t p g s e c]
+compress validate (k0, k, n, phi, hsubst) s s' =
     do
       let perm = updatePerm s s' (strandids k)
-      orderings' <- normalizeOrderings (permuteOrderings perm (orderings k))
+      orderings' <- normalizeOrderings validate
+                    (permuteOrderings perm (orderings k))
       let k' =
               newPreskel
               (gen k)
@@ -864,94 +924,149 @@ compress (k, n, hsubst) s s' =
               (deleteNth s (insts k))
               orderings'
               (knon k)
+              (kpnon k)
               (kunique k)
+              (updatePriority perm (kpriority k))
               (operation k)
               (updateProb perm (prob k))
               (pov k)
       k'' <- wellFormedPreskel k'
-      return (k'', permuteNode perm n, hsubst)
+      return (k0, k'', permuteNode perm n, map (perm !!) phi, hsubst)
 
 permuteOrderings :: [Sid] -> [Pair] -> [Pair]
 permuteOrderings perm orderings = map (permutePair perm) orderings
 
 updatePerm :: Int -> Int -> [Sid] -> [Sid]
 updatePerm old new perm =
-    map f perm
-    where
-      f i =
-          let j = if old == i then new else i in
-          if j > old then j - 1 else j
+    map (updateStrand old new) perm
+
+-- Old is to be eliminated and merged into new
+updateStrand :: Int -> Int -> Sid -> Sid
+updateStrand old new i =
+    let j = if old == i then new else i in
+    if j > old then j - 1 else j
 
 -- Eliminates implied intrastrand orderings and fails if it finds a
--- reverse intrastrand ordering.
-normalizeOrderings :: [Pair] -> Maybe [Pair]
-normalizeOrderings orderings =
+-- reverse intrastrand ordering when flag is true.
+normalizeOrderings :: Bool -> [Pair] -> [[Pair]]
+normalizeOrderings True orderings =
     loop [] orderings
     where
-      loop acc [] = Just acc
-      loop acc (p@((s0, p0), (s1, p1)) : ps)
+      loop acc [] = [acc]
+      loop acc (p@((s0, i0), (s1, i1)) : ps)
           | s0 /= s1 = loop (p : acc) ps
-          | p0 < p1 = loop acc ps
-          | otherwise = Nothing
+          | i0 < i1 = loop acc ps
+          | otherwise = []
+normalizeOrderings False orderings =
+    [filter (\ ((s0, _), (s1, _)) -> s0 /= s1) orderings]
 
 updateProb :: [Sid] -> [Sid] -> [Sid]
 updateProb mapping prob =
     map (mapping !!) prob
 
--- Hulling or Ensuring Unique Origination
+updatePriority :: [Sid] -> [(Node, Int)] -> [(Node, Int)]
+updatePriority mapping kpriority =
+    map (\(n, i) -> (permuteNode mapping n, i)) kpriority
+
+-- Purge a strand.  Used by thinning.  The same as pruning except
+-- edges to the purged strand are forwarded as a first step.
+purge :: Algebra t p g s e c => PRS t p g s e c ->
+            Sid -> Sid -> [PRS t p g s e c]
+purge (k0, k, n, phi, hsubst) s s' =
+    do
+      let perm = updatePerm s s' (strandids k)
+      orderings' <- normalizeOrderings False
+                    (permuteOrderings perm
+                     (forward s (orderings k))) -- Pruning difference
+      let k' =
+              newPreskel
+              (gen k)
+              (protocol k)
+              (deleteNth s (insts k))
+              orderings'
+              (knon k)
+              (kpnon k)
+              (kunique k)
+              (updatePriority perm (kpriority k))
+              (operation k)
+              (updateProb perm (prob k))
+              (pov k)
+      k'' <- wellFormedPreskel k'
+      return (k0, k'', permuteNode perm n, map (perm !!) phi, hsubst)
+
+-- Forward orderings from strand s
+forward :: Sid -> [Pair] -> [Pair]
+forward s orderings =
+    concatMap f orderings
+    where
+      f p@((s0, i0), (s1, i1))
+          | s0 == s = [((s2, i2), (s1, i1)) | -- Forward here
+                       ((s2, i2), (s3, i3)) <- orderings,
+                       s3 == s0 && i0 >= i3]
+          | s1 == s = []        -- Dump edges to strand s
+          | otherwise = [p]     -- Pass thru other edges
 
 -- This is the starting point of the Preskeleton Reduction System
+skeletonize :: Algebra t p g s e c => Bool -> PRS t p g s e c ->
+               [PRS t p g s e c]
+skeletonize prune prs
+    | useDeOrigination = hull prune prs
+    -- Cull preskels with a unique origination assumption that is not unique
+    | hasMultipleOrig prs = []  -- Usual case
+    | otherwise = enrich prune prs
+
+hasMultipleOrig :: Algebra t p g s e c => PRS t p g s e c -> Bool
+hasMultipleOrig prs =
+    any (\(_, l) -> length l > 1) (korig (skel prs))
+
+-- Hulling or Ensuring Unique Origination
 hull :: Algebra t p g s e c => Bool -> PRS t p g s e c ->
-        Maybe (PRS t p g s e c)
-hull prune (k, n, hsubst) =
-    loop (korig k)
+        [PRS t p g s e c]
+hull prune prs =
+    loop (korig $ skel prs)
     where
       -- No uniques originate on more than one strand
-      loop [] = enrich prune (k, n, hsubst)
+      loop [] = enrich prune prs
       -- Found a pair that needs hulling
-      loop ((_, (s, _) : (s', _) : _) : _) =
-          do
-            (s'', s''', subst) <- unifyStrands k s s'
-            prs <- ksubst (k, n, hsubst) subst
-            prs' <- compress prs s'' s'''
-            hull prune prs'
+      loop ((u, (s, i) : (s', i') : _) : _) =
+              hullByDeOrigination prune prs u (s, i) (s', i')
       loop(_ : orig) = loop orig
 
--- See if two strands unify.  They can be of differing heights.  The
--- second strand returned may be longer.
-unifyStrands :: Algebra t p g s e c => Preskel t p g s e c ->
-                Sid -> Sid -> Maybe (Sid, Sid, (g, s))
-unifyStrands k s s' =
-    let i = strandInst k s
-        i' = strandInst k s' in
-    if height i > height i' then
-        unifyStrands k s' s
-    else
-        do
-          (gen', subst) <- unifyTraces (trace i) (trace i') (gen k, emptySubst)
-          return (s, s', (gen', subst))
+-- De-Origination
 
--- Unify traces where the first trace is allowed to be shorter than
--- the second trace.
-unifyTraces :: Algebra t p g s e c => Trace t p g s e c ->
-               Trace t p g s e c -> (g, s) -> Maybe (g, s)
-unifyTraces [] _ subst = Just subst
-unifyTraces (In t : c) (In t' : c') subst =
-    maybe Nothing (unifyTraces c c') (unify t t' subst)
-unifyTraces (Out t : c) (Out t' : c') subst =
-    maybe Nothing (unifyTraces c c') (unify t t' subst)
-unifyTraces _ _ _ = Nothing
+hullByDeOrigination :: Algebra t p g s e c => Bool -> PRS t p g s e c ->
+                       t -> Node -> Node -> [PRS t p g s e c]
+hullByDeOrigination  prune prs u (s, i) (s', i') =
+    do
+      subst <- deOrig (skel prs) u (s, i) ++ deOrig (skel prs) u (s', i')
+      prs <- ksubst False prs subst
+      hull prune prs
+
+deOrig :: Algebra t p g s e c => Preskel t g s e -> t -> Node -> [(g, s)]
+deOrig k u (s, i) =
+    [ (g, s) |
+      let tr = trace $ strandInst k s,
+      e <- take i tr,
+      t <- inbnd e,
+      subterm <- S.toList $ foldCarriedTerms (flip S.insert) S.empty t,
+      (g, s) <- unify u subterm (gen k, emptySubst),
+      not $ originates (substitute s u) (map (evtMap $ substitute s) tr) ]
+
+-- Consider inbound messages only
+inbnd :: Algebra t p g s e c => Event t -> [t]
+inbnd (In t) = [t]
+inbnd (Out _) = []
 
 -- Order Enrichment
 
 -- Adds orderings so that a skeleton respects origination.
 
 enrich :: Algebra t p g s e c => Bool -> PRS t p g s e c ->
-          Maybe (PRS t p g s e c)
-enrich prune (k, n, hsubst) =
+          [PRS t p g s e c]
+enrich prune (k0, k, n, phi, hsubst) =
     let o = foldl (addOrderings k) (orderings k) (kunique k) in
     if length o == length (orderings k) then
-        maybePrune prune (k, n, hsubst)    -- Nothing to add
+        maybePrune prune (k0, k, n, phi, hsubst) -- Nothing to add
     else
         do
           let k' =
@@ -961,19 +1076,23 @@ enrich prune (k, n, hsubst) =
                   (insts k)
                   o
                   (knon k)
+                  (kpnon k)
                   (kunique k)
+                  (kpriority k)
                   (operation k)
                   (prob k)
                   (pov k)
           k' <- wellFormedPreskel k'
-          maybePrune prune (k', n, hsubst)
+          maybePrune prune (k0, k', n, phi, hsubst)
 
 maybePrune :: Algebra t p g s e c => Bool -> PRS t p g s e c ->
-              Maybe (PRS t p g s e c)
-maybePrune True prs = prune prs
+              [PRS t p g s e c]
+maybePrune True prs
+  | useThinning = thin prs
+  | otherwise = prune prs
 maybePrune False prs = reduce prs
 
-origNode :: Algebra t p g s e c => Preskel t p g s e c ->
+origNode :: Algebra t p g s e c => Preskel t g s e ->
             t -> Maybe Node
 origNode k t =
     case lookup t (korig k) of
@@ -982,7 +1101,7 @@ origNode k t =
       Just [n] -> Just n
       Just _ -> error "Strand.origNode: not a hulled skeleton"
 
-addOrderings :: Algebra t p g s e c => Preskel t p g s e c ->
+addOrderings :: Algebra t p g s e c => Preskel t g s e ->
                 [Pair] -> t -> [Pair]
 addOrderings k orderings t =
     case origNode k t of
@@ -997,7 +1116,7 @@ addOrderings k orderings t =
 
 -- At what position is a term gained in a trace?
 gainedPos :: Algebra t p g s e c => t ->
-             Trace t p g s e c -> Maybe Int
+             Trace t -> Maybe Int
 gainedPos t c =
     loop 0 c
     where
@@ -1011,70 +1130,308 @@ gainedPos t c =
 
 -- Redundant Strand Elimination (also known as pruning)
 
-prune :: Algebra t p g s e c => PRS t p g s e c -> Maybe (PRS t p g s e c)
-prune (k, n, hsubst) =
-    pruneStrands (k, n, hsubst) (strandids k) (strandids k)
+prune :: Algebra t p g s e c => PRS t p g s e c -> [PRS t p g s e c]
+prune prs =
+    pruneStrands prs (reverse $ strandids $ skel prs) (strandids $ skel prs)
 
 pruneStrands :: Algebra t p g s e c => PRS t p g s e c ->
-                     [Sid] -> [Sid] -> Maybe (PRS t p g s e c)
+                [Sid] -> [Sid] -> [PRS t p g s e c]
 pruneStrands prs [] _ =
     reduce prs                  -- No redundant strands found
-pruneStrands prs@(k, _, _) (_:ss) [] =
-    pruneStrands prs ss (strandids k)
+pruneStrands prs (_:ss) [] =
+    pruneStrands prs ss (strandids $ skel prs)
 pruneStrands prs (s:ss) (s':ss')
     | s == s' = pruneStrands prs (s:ss) ss'
     | otherwise =
-        maybe (pruneStrands prs (s:ss) ss')       -- Try next pair
-              prune                               -- Success
-              (pruneStrand prs s s')
-    where
-      -- A strand is redundant if there is an environment that maps
-      -- the trace of s into a prefix of the trace of s', but changes
-      -- no other traces in the preskeleton.
-      pruneStrand prs@(k, _, _) s s' =
-          do
-            env <- matchTraces
-                   (trace (strandInst k s))
-                   (trace (strandInst k s'))
-                   (gen k, emptyEnv)
-            (gen', env') <- idempotentEnvFor env
-                            (concatMap (tterms . trace) $ deleteNth s $ insts k)
-            case matchRenaming (gen', env') of
-              True -> return ()
-              False -> Nothing
-            case origCheck k env' of
-              True -> return ()
-              False -> Nothing
-            case all (precedesCheck k s s') (edges k) of
-              True -> return ()
-              False -> Nothing
-            prs <- ksubst prs (gen', substitution env')
-            compress prs s s'
+        case pruneStrand prs s s' of
+          [] -> pruneStrands prs (s:ss) ss'  -- Try next pair
+          prss ->                            -- Success
+              do
+                prs <- prss
+                prune prs
 
-matchTraces :: Algebra t p g s e c => Trace t p g s e c ->
-               Trace t p g s e c -> (g, e) -> Maybe (g, e)
-matchTraces [] _ env = Just env -- Pattern can be shorter
+-- Strand s is redundant if there is an environment that maps
+-- the trace of s into a prefix of the trace of s', but changes
+-- no other traces in the preskeleton.
+pruneStrand :: Algebra t p g s e c => PRS t p g s e c ->
+               Sid -> Sid -> [PRS t p g s e c]
+pruneStrand prs s s' =
+    do
+      let k = skel prs
+      case elem s (prob k) && elem s' (prob k) of
+        True -> fail ""   -- Strands s and s' in image of POV skeleton
+        False -> return ()
+      env <- matchTraces
+             (trace (strandInst k s))
+             (trace (strandInst k s'))
+             (gen k, emptyEnv)
+      let ts = concatMap (tterms . trace) $ deleteNth s $ insts k
+      (gen', env') <- identityEnvFor env ts
+      case matchRenaming (gen', env') of
+        True -> return ()
+        False -> fail ""
+      case origCheck k env' of
+        True -> return ()
+        False -> fail ""
+      case all (precedesCheck k s s') (edges k) of
+        True -> return ()
+        False -> fail ""
+      case not useStrictPrecedesCheck ||
+           strictPrecedesCheck s s' (orderings k) &&
+           strictPrecedesCheck s' s (orderings k) of
+        True -> return ()
+        False -> fail ""
+      case not usePruningUnboundCheck || unboundCheck k s s' env' of
+        True -> return ()
+        False -> fail ""
+      prs <- ksubst True prs (gen', substitution env')
+      compress True prs s s'
+
+matchTraces :: Algebra t p g s e c => Trace t ->
+               Trace t -> (g, e) -> [(g, e)]
+matchTraces [] _ env = [env]    -- Pattern can be shorter
 matchTraces (In t : c) (In t' : c') env =
-    maybe Nothing (matchTraces c c') (match t t' env)
+    do
+      e <- match t t' env
+      matchTraces c c' e
 matchTraces (Out t : c) (Out t' : c') env =
-    maybe Nothing (matchTraces c c') (match t t' env)
-matchTraces _ _ _ = Nothing
+    do
+      e <- match t t' env
+      matchTraces c c' e
+matchTraces _ _ _ = []
 
-origCheck :: Algebra t p g s e c => Preskel t p g s e c -> e -> Bool
+-- Make sure a substitution does not take a unique out of the set of
+-- uniques, and the same for nons and pnons.
+origCheck :: Algebra t p g s e c => Preskel t g s e -> e -> Bool
 origCheck k env =
-    check (kunique k) && check (knon k)
+    check (kunique k) && check (knon k) && check (kpnon k)
     where
       check orig =
           all (pred orig) orig
       pred set item =
           elem (instantiate env item) set
 
-precedesCheck :: Algebra t p g s e c => Preskel t p g s e c ->
-                 Sid -> Sid -> Edge t p g s e c -> Bool
+-- Ensure that if (s, p) precedes (s", p"), then (s', p) precedes (s", p")
+-- and if (s", p") precedes (s, p), then (s", p") precedes (s', p)
+precedesCheck :: Algebra t p g s e c => Preskel t g s e ->
+                 Sid -> Sid -> Edge t e -> Bool
 precedesCheck k s s' (gn0, gn1)
     | s == sid (strand gn0) = graphPrecedes (vertex k (s', pos gn0)) gn1
     | s == sid (strand gn1) = graphPrecedes gn0 (vertex k (s', pos gn1))
     | otherwise = True
+
+-- Experiment
+strictPrecedesCheck :: Sid -> Sid -> [Pair] -> Bool
+strictPrecedesCheck s s' pairs =
+    all (flip elem pairs) before &&
+    all (flip elem pairs) after
+    where
+      before = [ (n0, (s', i1)) |
+                 (n0, (s1, i1)) <- pairs,
+                 s1 == s ]
+      after = [ ((s', i0), n1) |
+                 ((s0, i0), n1) <- pairs,
+                 s0 == s ]
+
+-- Another experiment
+unboundCheck :: Algebra t p g s e c => Preskel t g s e ->
+              Sid -> Sid -> e -> Bool
+unboundCheck k s s' env =
+    all (flip S.member unbound) (map (instantiate env) (S.elems unbound))
+    where
+      -- The vars in s and s'
+      this = addIvars (addIvars S.empty (strandInst k s)) (strandInst k s')
+      -- The vars in strands other than s and s'
+      others = kvarsBut k s s'
+      unbound = S.difference this others
+
+kvarsBut :: Algebra t p g s e c => Preskel t g s e ->
+            Sid -> Sid -> Set t
+kvarsBut k s s' =
+    loop S.empty (insts k) 0
+    where
+      loop xs [] _ = xs
+      loop xs (i:is) s''
+          | s'' == s || s'' == s' =
+              loop xs is (s'' + 1)
+          | otherwise =
+              loop (addIvars xs i) is (s'' + 1)
+
+-- Thinning
+
+thin :: Algebra t p g s e c => PRS t p g s e c -> [PRS t p g s e c]
+thin prs =
+    thinStrands prs [] $ reverse ss
+    where                       -- Remove strands in image of POV
+      ss = filter (\s -> notElem s (prob $ skel prs)) (strandids $ skel prs)
+
+-- Takes a skeleton, a list of pairs of strands that matched, and a
+-- list of strands yet to be analyzed, and produces the result of
+-- skeletonization.  It first tries single pair thinning, and during
+-- that process collects potential multistrand thinning pairs.  Once
+-- there are no more unanalyzed strands, it tries multistrand
+-- thinning.
+thinStrands :: Algebra t p g s e c => PRS t p g s e c ->
+               [(Sid, Sid)] -> [Sid] -> [PRS t p g s e c]
+thinStrands prs ps [] =         -- All strands analyzied
+    case multiPairs ps of       -- Generate multipairs
+      [] -> reduce prs
+      mps -> thinMany prs mps   -- Try multistrand thinning
+thinStrands prs ps (s:ss) =
+  thinStrandPairs prs ps s ss ss
+
+-- This loop tries pairs of strands.  Takes a skeleton, a list of
+-- pairs of strands that matched but did not thin, a strand to be
+-- eliminated, a list of strands to be used in the outer loop
+-- (thinStrands), and a list of strands to be considered for matching,
+-- and produces the result of skeletonization.
+thinStrandPairs :: Algebra t p g s e c => PRS t p g s e c -> [(Sid, Sid)] ->
+                   Sid -> [Sid] -> [Sid] -> [PRS t p g s e c]
+thinStrandPairs prs ps _ ss [] =
+  thinStrands prs ps ss
+thinStrandPairs prs ps s ss (s':ss') =
+  case thinStrand prs s s' of
+    -- Try next pair, there was no match
+    Nothing -> thinStrandPairs prs ps s ss ss'
+    -- Try next pair, there was a match so save this pair
+    Just [] -> thinStrandPairs prs ((s, s'):ps) s ss ss'
+    Just prss ->                -- Success at single strand thinning
+      do
+        prs <- prss
+        thin prs                -- Restart from the beginning
+
+-- Try thinning s with s'.  If there was no match, return Nothing,
+-- else return Just the list of results.
+thinStrand :: Algebra t p g s e c => PRS t p g s e c ->
+              Sid -> Sid -> Maybe [PRS t p g s e c]
+thinStrand prs s s' =
+    let k = skel prs in
+    case thinStrandMatch k s s' (gen k, emptyEnv) of
+      [] -> Nothing
+      ges ->
+          Just $ do
+            e <- ges
+            (gen, env) <- thinStrandCheck k s e
+            [ prs' | prs <- ksubst False prs (gen, substitution env),
+                     prs <- reduce prs,
+                     prs' <- purge prs s s',
+                     prs'' <- purge prs s' s,
+                     isomorphic (gist (skel prs')) (gist (skel prs''))]
+
+-- See if two strands match.
+thinStrandMatch :: Algebra t p g s e c => Preskel t g s e ->
+                   Sid -> Sid -> (g, e) -> [(g, e)]
+thinStrandMatch k s s' env =
+  do
+    let i = strandInst k s
+    let i' = strandInst k s'
+    case height i /= height i' of
+      True -> fail ""
+      False -> return ()
+    matchTraces (trace i) (trace i') env
+
+-- Do the identity, renaming, and origination check.
+thinStrandCheck :: Algebra t p g s e c => Preskel t g s e ->
+                   Sid -> (g, e) -> [(g, e)]
+thinStrandCheck k s env =
+  do
+    let ts = concatMap (tterms . trace) $ deleteNth s $ insts k
+    (gen', env') <- identityEnvFor env ts
+    case matchRenaming (gen', env') of
+      True -> return ()
+      False -> fail ""
+    case origCheck k env' of
+      True -> return (gen', env')
+      False -> fail ""
+
+-- Multistrand thinning
+
+-- Generate all candidate pairings
+multiPairs :: [(Sid, Sid)] ->  [[(Sid, Sid)]]
+multiPairs _ | useSingleStrandThinning = []
+multiPairs ps = filter atLeastTwo $ thinOne ps
+
+-- List is of length at least two.
+atLeastTwo :: [a] -> Bool
+atLeastTwo (_:_:_) = True
+atLeastTwo _ = False
+
+thinOne :: [(Sid, Sid)] -> [[(Sid, Sid)]]
+thinOne [] = []
+thinOne (p:ps) =
+    thinTwo p ps ++ thinOne ps
+
+-- Construct possible pairs that include (s, s').
+thinTwo :: (Sid, Sid) -> [(Sid, Sid)] -> [[(Sid, Sid)]]
+thinTwo (s, s') ps =
+    [(s, s')] : [(s, s') : ps' | ps' <- thinOne (filter (diff (s, s')) ps)]
+    where                       -- filter out pairs with seen strands
+      diff (s0, s1) (s2, s3) =
+          s0 /= s2 && s0 /= s3 && s1 /= s2 && s1 /= s3
+
+-- Try all multistrand pairings until one succeeds.
+thinMany :: Algebra t p g s e c => PRS t p g s e c ->
+            [[(Sid, Sid)]] -> [PRS t p g s e c]
+thinMany prs [] = reduce prs
+thinMany prs (ps:mps) =
+    case thinManyStrands prs ps of
+      [] -> thinMany prs mps
+      prss ->                           -- Success
+        do
+          prs <- prss
+          thin prs
+
+thinManyStrands :: Algebra t p g s e c => PRS t p g s e c ->
+                   [(Sid, Sid)] -> [PRS t p g s e c]
+thinManyStrands prs ps =
+    do
+      let k = skel prs
+      (gen, env) <- thinManyMatch k ps
+      [ prs' | prs <- ksubst False prs (gen, substitution env),
+               prs <- reduce prs,
+               prs' <- compressMany prs ps,
+               prs'' <- compressMany prs (swap ps),
+               isomorphic (gist (skel prs')) (gist (skel prs''))]
+
+thinManyMatch :: Algebra t p g s e c => Preskel t g s e ->
+                [(Sid, Sid)] -> [(g, e)]
+thinManyMatch k ps =
+    do
+      let f e (s, s') = thinStrandMatch k s s' e
+      env <- foldM f (gen k, emptyEnv) ps
+      let ss = concatMap (\(s, s') -> [s, s']) ps
+      let ts = concatMap (tterms . trace) $ deleteMany ss $ insts k
+      (gen', env') <- identityEnvFor env ts
+      case matchRenaming (gen', env') of
+        True -> return ()
+        False -> fail ""
+      case origCheck k env' of
+        True -> return (gen', env')
+        False -> fail ""
+
+deleteMany :: [Int] -> [a] -> [a]
+deleteMany nums xs =
+    loop 0 xs
+    where
+      loop _ [] = []
+      loop n (x:xs) | elem n nums = loop (n + 1) xs
+                    | otherwise = x : loop (n + 1) xs
+
+compressMany :: Algebra t p g s e c => PRS t p g s e c ->
+                [(Sid, Sid)] -> [PRS t p g s e c]
+compressMany prs [] = [prs]
+compressMany prs ((s, s'):ps) =
+    do
+      prs' <- purge prs s s'
+      compressMany prs' (map (updatePairs s s') ps)
+
+swap :: [(a, a)] -> [(a, a)]
+swap ps =
+    map (\(x, y) -> (y, x)) ps
+
+updatePairs :: Sid -> Sid -> (Sid, Sid) -> (Sid, Sid)
+updatePairs old new (s, s') =
+    (updateStrand old new s, updateStrand old new s')
 
 -- Transitive Reduction
 
@@ -1082,11 +1439,11 @@ precedesCheck k s s' (gn0, gn1)
 -- source to its destination.  This function removes all non-essential
 -- edges from the ordering relation.
 
-reduce :: Algebra t p g s e c => PRS t p g s e c -> Maybe (PRS t p g s e c)
-reduce (k, n, hsubst) =
+reduce :: Algebra t p g s e c => PRS t p g s e c -> [PRS t p g s e c]
+reduce (k0, k, n, phi, hsubst) =
     let o = map graphPair (graphReduce (edges k)) in
     if length o == length (orderings k) then
-        Just (k, n, hsubst)     -- Nothing to take away
+        return (k0, k, n, phi, hsubst) -- Nothing to take away
     else
         do
           let k' =
@@ -1096,166 +1453,203 @@ reduce (k, n, hsubst) =
                   (insts k)
                   o
                   (knon k)
+                  (kpnon k)
                   (kunique k)
+                  (kpriority k)
                   (operation k)
                   (prob k)
                   (pov k)
           k'' <- wellFormedPreskel k'
-          return (k'', n, hsubst)
+          return (k0, k'', n, phi, hsubst)
+
+-- Answers for cohorts
+type Ans t p g s e c = (Preskel t g s e, Node, [Sid], s)
+
+ans :: Algebra t p g s e c => PRS t p g s e c -> Ans t p g s e c
+ans (_, k, n, phi, subst) = (k, n, phi, subst)
+
+-- Homomorphism Filter
+
+homomorphismFilter :: Algebra t p g s e c => PRS t p g s e c ->
+                      [Ans t p g s e c]
+homomorphismFilter prs@(k0, k, _, phi, subst)
+    | validateMappingSubst k0 phi subst k = [ans prs]
+    | otherwise = []
+
+-- Ensure origination nodes a preserved as required to be a homomorphism
+validateMappingSubst :: Algebra t p g s e c => Preskel t g s e ->
+                        [Sid] -> s -> Preskel t g s e -> Bool
+validateMappingSubst k phi subst k' =
+    useNoOrigPreservation || all check (korig k)
+    where
+      check (u, ns) =
+          case lookup (substitute subst u) (korig k') of
+            Nothing -> False
+            Just ns' -> all (flip elem ns') (map (permuteNode phi) ns)
 
 -- Returns the skeleton associated with a preskeleton or nothing when
 -- there isn't one.  Manufacture a node and a term, and then drop them
 -- afterwards.
-toSkeleton :: Algebra t p g s e c => Bool -> Preskel t p g s e c ->
-              Maybe (Preskel t p g s e c)
+toSkeleton :: Algebra t p g s e c => Bool -> Preskel t g s e ->
+              [Preskel t g s e]
 toSkeleton prune k =
     do
-      (k, _, _) <- hull prune (k, (0, 0), emptySubst)
-      return k
+      prs <- skeletonize prune (k, k, (0, 0), strandids k, emptySubst)
+      (k', _, _, _) <- homomorphismFilter prs
+      return k'
 
 -- Contraction
 
-contract :: Algebra t p g s e c => Preskel t p g s e c -> Node ->
-            Cause t p g s e c -> (g, s) -> Maybe (PRS t p g s e c)
+contract :: Algebra t p g s e c => Preskel t g s e -> Node ->
+            Cause t -> (g, s) -> [Ans t p g s e c]
 contract k n cause subst =
     do
-      prs <- ksubst (k { operation = Contracted emptySubst cause },
-                       n, emptySubst) subst
-      hull True prs
+      prs <- ksubst False (k, k { operation = Contracted emptySubst cause },
+                           n, strandids k, emptySubst) subst
+      prs' <- skeletonize usePruningWhileSolving prs
+      homomorphismFilter prs'
 
 -- Regular Augmentation
 
--- Apply a substitution and then augment.  Augmentations add an
--- instance and one ordered pair.
+-- First argument determines if displacement is used.
+augment :: Algebra t p g s e c => Preskel t g s e ->
+           Node -> Cause t -> Role t ->
+           (g, s) -> Instance t e -> [Ans t p g s e c]
+augment k0 n cause role subst inst =
+    do
+      prs <- augmentAndDisplace k0 n cause role subst inst
+      homomorphismFilter prs
 
-augment :: Algebra t p g s e c => Bool -> Preskel t p g s e c ->
-           Node -> Cause t p g s e c -> Role t p g s e c ->
-           (g, s) -> Instance t p g s e c -> [PRS t p g s e c]
-augment useDisplacement k0 n cause role subst inst =
-    case substAndAugment useDisplacement k0 n cause role subst inst of
-      Nothing -> []
-      Just prs@(k, n, hsubst) ->
-          case useDisplacement of
-            False -> [prs]
-            True ->
-                case hull True prs of
-                  Nothing -> augDisplace k0 k n hsubst
-                  Just prs -> prs : augDisplace k0 k n hsubst
+-- Apply a substitution, and then augment and displace.  Augmentations
+-- add an instance and one ordered pair.  Displacements add an ordered
+-- pair and may add nodes.
 
-substAndAugment :: Algebra t p g s e c => Bool -> Preskel t p g s e c ->
-                   Node -> Cause t p g s e c -> Role t p g s e c ->
-                   (g, s) -> Instance t p g s e c -> Maybe (PRS t p g s e c)
-substAndAugment useDisplacement k n cause role subst inst =
+augmentAndDisplace :: Algebra t p g s e c => Preskel t g s e ->
+                      Node -> Cause t -> Role t ->
+                      (g, s) -> Instance t e -> [PRS t p g s e c]
+augmentAndDisplace k0 n cause role subst inst =
+    do
+      prs <- substAndAugment k0 n cause role subst inst
+      augDisplace prs ++ skeletonize usePruningWhileSolving prs
+
+-- Apply the substitution and apply augmentation operator.
+substAndAugment :: Algebra t p g s e c => Preskel t g s e ->
+                   Node -> Cause t -> Role t ->
+                   (g, s) -> Instance t e -> [PRS t p g s e c]
+substAndAugment k n cause role subst inst =
     do
       let operation' = AddedStrand (rname role) (height inst) cause
-      prs <- ksubst (k { operation = operation' }, n, emptySubst) subst
-      aug useDisplacement prs inst
+      prs <- ksubst False (k, k { operation = operation' }, n,
+                           strandids k, emptySubst) subst
+      aug prs inst
 
-aug :: Algebra t p g s e c => Bool -> PRS t p g s e c ->
-       Instance t p g s e c -> Maybe (PRS t p g s e c)
-aug useDisplacement (k, n, hsubst) inst =
+-- Apply the augmentation operator by adding an instance and one
+-- ordered pair.
+aug :: Algebra t p g s e c => PRS t p g s e c ->
+       Instance t e -> [PRS t p g s e c]
+aug (k0, k, n, phi, hsubst) inst =
     do
       let insts' = (insts k) ++ [inst]
       let pair = ((length (insts k), height inst - 1), n)
       let orderings' = pair : orderings k
       let non' = inheritRnon inst ++ (knon k)
+      let pnon' = inheritRpnon inst ++ (kpnon k)
       let unique' = inheritRunique inst ++ (kunique k)
       let k' = newPreskel (gen k) (protocol k) insts'
-           orderings' non' unique' (operation k) (prob k) (pov k)
+           orderings' non' pnon' unique' (kpriority k)
+           (operation k) (prob k) (pov k)
       k' <- wellFormedPreskel k'
-      case useDisplacement of
-        False ->
-            do
-              (k', n, hsubst) <- augCollapses k (k', n, hsubst) (nstrands k)
-              hull True (k', n, hsubst)
-        True -> return (k', n, hsubst)
+      return (k0, k', n, phi, hsubst)
 
 -- Inherit non-originating atoms if the traces is long enough
-inheritRnon :: Algebra t p g s e c => Instance t p g s e c -> [t]
+inheritRnon :: Algebra t p g s e c => Instance t e -> [t]
 inheritRnon i =
     inherit i (rnorig (role i))
 
+-- Inherit penenetrator non-originating atoms if the traces is long enough
+inheritRpnon :: Algebra t p g s e c => Instance t e -> [t]
+inheritRpnon i =
+    inherit i (rpnorig (role i))
+
 -- Inherit uniquely originating atoms if the traces is long enough
-inheritRunique :: Algebra t p g s e c => Instance t p g s e c -> [t]
+inheritRunique :: Algebra t p g s e c => Instance t e -> [t]
 inheritRunique i =
     inherit i (ruorig (role i))
 
-inherit :: Algebra t p g s e c => Instance t p g s e c -> [(t, Int)] -> [t]
+inherit :: Algebra t p g s e c => Instance t e -> [(t, Int)] -> [t]
 inherit i rorigs =
     map (instantiate (env i) . fst) $ filter f rorigs
     where
       f (_, pos) = pos < height i
 
-augCollapses :: Algebra t p g s e c => Preskel t p g s e c ->
-                PRS t p g s e c -> Sid -> Maybe (PRS t p g s e c )
-augCollapses k0 prs@(k, _, _) s =
-    case findCollapses k s of
-      s':_ ->
-          do
-            (_, _, subst) <- unifyStrands k s s'
-            augSubst k0 prs subst
-      _ -> return prs
-
--- Find the strands that share an origination point with s
-findCollapses :: Algebra t p g s e c => Preskel t p g s e c -> Sid -> [Sid]
-findCollapses k s =
-    L.nub [ s' | (_, nodes) <- korig k,
-                 let ss = map fst nodes,
-                 elem s ss,
-                 s' <- ss,
-                 s' /= s]
-
-augSubst :: Algebra t p g s e c => Preskel t p g s e c ->
-            PRS t p g s e c -> (g, s) -> Maybe (PRS t p g s e c)
-augSubst k0 (k, n, hsubst) (gen, subst) =
+-- Add all displacements
+augDisplace :: Algebra t p g s e c => PRS t p g s e c -> [PRS t p g s e c]
+augDisplace prs =
     do
-      (gen', insts') <- foldMapM (substInst subst) gen (insts k)
-      let non' = map (substitute subst) (knon k)
-      let unique' = map (substitute subst) (kunique k)
-      let operation' = substOper subst (operation k)
-      let k' = newPreskel gen' (protocol k) insts'
-               (orderings k) non' unique' operation' (prob k) (pov k)
-      k' <- wellFormedPreskel k'
-      let hsubst' = compose subst hsubst
-      case validateSubst k0 hsubst' k' of
-        True -> return (k', n, hsubst')
-        False -> Nothing
+      let s = nstrands (skel prs) - 1
+      s' <- nats s
+      augDisplaceStrands prs s s'
 
-augDisplace :: Algebra t p g s e c => Preskel t p g s e c ->
-               Preskel t p g s e c -> Node -> s -> [PRS t p g s e c]
-augDisplace k0 k n hsubst =
-    let s = nstrands k - 1 in
-    [k' | s' <- nats s,
-          k' <- M.maybeToList $ augDisplaceStrands k0 k n hsubst s s']
-
-augDisplaceStrands :: Algebra t p g s e c => Preskel t p g s e c ->
-                      Preskel t p g s e c -> Node -> s ->
-                      Sid -> Sid -> Maybe (PRS t p g s e c)
-augDisplaceStrands k0 k n hsubst s s' =
+-- Try to displace with strand s'
+augDisplaceStrands :: Algebra t p g s e c => PRS t p g s e c ->
+                      Sid -> Sid -> [PRS t p g s e c]
+augDisplaceStrands (k0, k, n, phi, hsubst) s s' =
     do
       (s, s', subst) <- unifyStrands k s s'
       let op = addedToDisplaced (operation k) s s'
-      prs <- augSubst k0 (k { operation = op}, n, hsubst) subst
-      prs <- compress prs s s'
-      hull True prs
+      prs <- ksubst False (k0, k { operation = op}, n, phi, hsubst) subst
+      prs <- compress True prs s s'
+      skeletonize usePruningWhileSolving prs
 
-addedToDisplaced :: Algebra t p g s e c => Operation t p g s e c ->
-                    Int -> Int -> Operation t p g s e c
+-- See if two strands unify.  They can be of differing heights.  The
+-- second strand returned may be longer.
+unifyStrands :: Algebra t p g s e c => Preskel t g s e ->
+                Sid -> Sid -> [(Sid, Sid, (g, s))]
+unifyStrands k s s' =
+    let i = strandInst k s
+        i' = strandInst k s' in
+    if height i > height i' then
+        unifyStrands k s' s
+    else
+        do
+          (gen', subst) <- unifyTraces (trace i) (trace i') (gen k, emptySubst)
+          return (s, s', (gen', subst))
+
+-- Unify traces where the first trace is allowed to be shorter than
+-- the second trace.
+unifyTraces :: Algebra t p g s e c => Trace t ->
+               Trace t -> (g, s) -> [(g, s)]
+unifyTraces [] _ subst = [subst]
+unifyTraces (In t : c) (In t' : c') subst =
+    do
+      s <- unify t t' subst
+      unifyTraces c c' s
+unifyTraces (Out t : c) (Out t' : c') subst =
+    do
+      s <- unify t t' subst
+      unifyTraces c c' s
+unifyTraces _ _ _ = []
+
+addedToDisplaced :: Algebra t p g s e c => Operation t s ->
+                    Int -> Int -> Operation t s
 addedToDisplaced (AddedStrand role height cause) s s' =
     Displaced s s' role height cause
 addedToDisplaced _ _ _ = error "Strand.addedToDisplaced: Bad operation"
 
 -- Listener Augmentation
 
-addListener :: Algebra t p g s e c => Preskel t p g s e c -> Node ->
-               Cause t p g s e c -> t -> Maybe (PRS t p g s e c)
+addListener :: Algebra t p g s e c => Preskel t g s e -> Node ->
+               Cause t -> t -> [Ans t p g s e c]
 addListener k n cause t =
     do
       k' <- wellFormedPreskel k'
-      hull True (k', n, emptySubst)
+      prs <- skeletonize usePruningWhileSolving
+             (k, k', n, strandids k, emptySubst)
+      homomorphismFilter prs
     where
-      k' = newPreskel gen' (protocol k) insts' orderings'
-           (knon k) (kunique k) (AddedListener t cause) (prob k) (pov k)
+      k' = newPreskel gen' (protocol k) insts' orderings' (knon k)
+           (kpnon k) (kunique k) (kpriority k)
+           (AddedListener t cause) (prob k) (pov k)
       (gen', inst) = mkListener (gen k) t
       insts' = insts k ++ [inst]
       pair = ((length (insts k), 1), n)
@@ -1267,39 +1661,40 @@ addListener k n cause t =
 -- homomorphism between the two skeletons using the given
 -- strand mapping function.
 
-homomorphism :: Algebra t p g s e c => Preskel t p g s e c ->
-                Preskel t p g s e c -> [Sid] -> Maybe e
+homomorphism :: Algebra t p g s e c => Preskel t g s e ->
+                Preskel t g s e -> [Sid] -> [e]
 homomorphism k k' mapping =
     do
       (_, env) <- findReplacement k k' mapping
       case validateEnv k k' mapping env of
-        True -> Just env
-        False -> Nothing
+        True -> [env]
+        False -> []
 
-findReplacement :: Algebra t p g s e c => Preskel t p g s e c ->
-                   Preskel t p g s e c -> [Sid] -> Maybe (g, e)
+findReplacement :: Algebra t p g s e c => Preskel t g s e ->
+                   Preskel t g s e -> [Sid] -> [(g, e)]
 findReplacement k k' mapping =
     foldM (matchStrand k k' mapping) (gen k', emptyEnv) (strandids k)
 
-matchStrand :: Algebra t p g s e c => Preskel t p g s e c ->
-               Preskel t p g s e c -> [Sid] -> (g, e) -> Sid -> Maybe (g, e)
+matchStrand :: Algebra t p g s e c => Preskel t g s e ->
+               Preskel t g s e -> [Sid] -> (g, e) -> Sid -> [(g, e)]
 matchStrand k k' mapping env s =
     matchTraces (trace (strandInst k s)) (trace (strandInst k' s')) env
     where
       s' = mapping !! s
 
-validateEnv :: Algebra t p g s e c => Preskel t p g s e c ->
-               Preskel t p g s e c -> [Sid] -> e -> Bool
+validateEnv :: Algebra t p g s e c => Preskel t g s e ->
+               Preskel t g s e -> [Sid] -> e -> Bool
 validateEnv k k' mapping env =
     all (flip elem (knon k')) (map (instantiate env) (knon k)) &&
+    all (flip elem (kpnon k')) (map (instantiate env) (kpnon k)) &&
     all (flip elem (kunique k')) (map (instantiate env) (kunique k)) &&
     validateEnvOrig k k' mapping env &&
     all (flip elem (tc k')) (permuteOrderings mapping (orderings k))
 
-validateEnvOrig :: Algebra t p g s e c => Preskel t p g s e c ->
-                   Preskel t p g s e c -> [Sid] -> e -> Bool
+validateEnvOrig :: Algebra t p g s e c => Preskel t g s e ->
+                   Preskel t g s e -> [Sid] -> e -> Bool
 validateEnvOrig k k' mapping env =
-    all check (korig k)
+    useNoOrigPreservation || all check (korig k)
     where
       check (u, ns) =
           case lookup (instantiate env u) (korig k') of
@@ -1311,18 +1706,21 @@ validateEnvOrig k k' mapping env =
 -- candidate to k.  The preskeleton need not be well formed, as that
 -- test is applied elsewhere.
 
-type Candidate t p g s e c = (Preskel t p g s e c, [Sid])
+type Candidate t p g s e c = (Preskel t g s e, [Sid])
 
-addIdentity :: Algebra t p g s e c => Preskel t p g s e c ->
+addIdentity :: Algebra t p g s e c => Preskel t g s e ->
                Candidate t p g s e c
 addIdentity k = (k, strandids k)
 
-generalize :: Algebra t p g s e c => Preskel t p g s e c ->
+separateVariablesLimit :: Int
+separateVariablesLimit = 1024
+
+generalize :: Algebra t p g s e c => Preskel t g s e ->
               [Candidate t p g s e c]
-generalize k = deleteNodes k
-               (weakenOrderings k
-                (forgetAssumption k
-                 (separateVariables k [])))
+generalize k = deleteNodes k ++
+               weakenOrderings k ++
+               forgetAssumption k ++
+               take separateVariablesLimit (separateVariables k)
 
 -- Node deletion
 
@@ -1338,30 +1736,31 @@ delete node n in k
 6. update prob upon instance deletion
 -}
 
-deleteNodes :: Algebra t p g s e c => Preskel t p g s e c ->
-               [Candidate t p g s e c] -> [Candidate t p g s e c]
-deleteNodes k cs =
-    foldr f cs [ node | strand <- strands k, node <- nodes strand ]
-    where                       -- Function f called for each node
-      f n cs = maybe cs (: cs) (deleteNode k n) --  in the skeleton
+deleteNodes :: Algebra t p g s e c => Preskel t g s e ->
+               [Candidate t p g s e c]
+deleteNodes k =
+    do
+      strand <- strands k
+      node <- nodes strand
+      deleteNode k node
 
-deleteNode :: Algebra t p g s e c => Preskel t p g s e c ->
-              Vertex t p g s e c -> Maybe (Preskel t p g s e c, [Sid])
+deleteNode :: Algebra t p g s e c => Preskel t g s e ->
+              Vertex t e -> [(Preskel t g s e, [Sid])]
 deleteNode k n
-    | p == 0 && elem s (prob k) = Nothing
+    | p == 0 && elem s (prob k) = []
     | p == 0 =
         do
           let mapping = deleteNth s (strandids k)
-          k' <- deleteNodeRest k (gen k) (s, p) (deleteNth s (insts k))
-                (deleteOrderings s (tc k)) (updatePerm s s (prob k))
+          let k' = deleteNodeRest k (gen k) (s, p) (deleteNth s (insts k))
+                   (deleteOrderings s (tc k)) (updatePerm s s (prob k))
           return (k', mapping)
     | otherwise =
         do
           let mapping = strandids k
           let i = inst (strand n)
           (gen', i') <- bldInstance (role i) (take p (trace i)) (gen k)
-          k' <- deleteNodeRest k gen' (s, p) (replaceNth i' s (insts k))
-                (shortenOrderings (s, p) (tc k)) (prob k)
+          let k' = deleteNodeRest k gen' (s, p) (replaceNth i' s (insts k))
+                   (shortenOrderings (s, p) (tc k)) (prob k)
           return (k', mapping)
     where
       p = pos n
@@ -1370,40 +1769,48 @@ deleteNode k n
 -- Update orderings when a strand is eliminated (p == 0)
 deleteOrderings :: Sid -> [Pair] -> [Pair]
 deleteOrderings s ps =
-    M.mapMaybe deleteOrdering ps
+    do
+      p <- ps
+      deleteOrdering p
     where
       deleteOrdering (n0@(s0, _), n1@(s1, _))
-          | s == s0 || s == s1 = Nothing
-          | otherwise = Just (adjust n0, adjust n1)
-      adjust n@(s', p')
-          | s' > s = (s' - 1, p')
+          | s == s0 || s == s1 = []
+          | otherwise = [(adjust n0, adjust n1)]
+      adjust n@(s', i')
+          | s' > s = (s' - 1, i')
           | otherwise = n
 
 -- Update orderings when a strand is shortened (p > 0)
 shortenOrderings :: Node -> [Pair] -> [Pair]
-shortenOrderings (s, p) ps =
-    M.mapMaybe shortenOrdering ps
+shortenOrderings (s, i) ps =
+    do
+      pair <- ps
+      shortenOrdering pair
     where
-      shortenOrdering (n0@(s0, p0), n1@(s1, p1))
-          | s == s0 && p <= p0 = Nothing
-          | s == s1 && p <= p1 = Nothing
-          | otherwise = Just (n0, n1)
+      shortenOrdering p@((s0, i0), (s1, i1))
+          | s == s0 && i <= i0 = []
+          | s == s1 && i <= i1 = []
+          | otherwise = [p]
 
-deleteNodeRest :: Algebra t p g s e c => Preskel t p g s e c ->
-                  g -> Node -> [Instance t p g s e c] -> [Pair] ->
-                  [Sid] -> Maybe (Preskel t p g s e c)
+deleteNodeRest :: Algebra t p g s e c => Preskel t g s e ->
+                  g -> Node -> [Instance t e] -> [Pair] ->
+                  [Sid] -> Preskel t g s e
 deleteNodeRest k gen n insts' orderings prob =
-    Just k'
+    newPreskel gen (protocol k) insts' orderings non' pnon' unique'
+                   prio' (Generalized (Deleted n)) prob (pov k)
     where
-      k' = newPreskel gen (protocol k) insts'
-           orderings non' unique' (Generalized (Deleted n)) prob (pov k)
       -- Drop nons that aren't mentioned anywhere
       non' = filter mentionedIn (knon k)
+      pnon' = filter mentionedIn (kpnon k)
       mentionedIn t = varSubset [t] terms
       terms = iterms insts'
       -- Drop uniques that aren't carried anywhere
       unique' = filter carriedIn (kunique k)
       carriedIn t = any (carriedBy t) terms
+      -- Drop unused priorities
+      prio' = filter within (kpriority k)
+      within ((s, i), _) =
+        s < fst n || s == fst n && i < snd n
 
 -- Node ordering weakening
 
@@ -1417,24 +1824,23 @@ deleteNodeRest k gen n insts' orderings prob =
 -- same strand.  The preskeleton constructor function performs a
 -- transitive reduction on the generated ordering.
 
-weakenOrderings :: Algebra t p g s e c => Preskel t p g s e c ->
-                   [Candidate t p g s e c] -> [Candidate t p g s e c]
-weakenOrderings k cs =
-    foldr (weakenOrdering k) cs (orderings k)
+weakenOrderings :: Algebra t p g s e c => Preskel t g s e ->
+                   [Candidate t p g s e c]
+weakenOrderings k =
+    map (weakenOrdering k) (orderings k)
 
-weakenOrdering :: Algebra t p g s e c => Preskel t p g s e c ->
-                  Pair -> [Candidate t p g s e c] ->
-                  [Candidate t p g s e c]
-weakenOrdering k p cs =
-    weaken k p (L.delete p (tc k)) : cs
+weakenOrdering :: Algebra t p g s e c => Preskel t g s e ->
+                  Pair -> Candidate t p g s e c
+weakenOrdering k p =
+    weaken k p (L.delete p (tc k))
 
-weaken :: Algebra t p g s e c => Preskel t p g s e c ->
+weaken :: Algebra t p g s e c => Preskel t g s e ->
           Pair -> [Pair] -> Candidate t p g s e c
 weaken k p orderings =
     addIdentity k'
     where
       k' = newPreskel (gen k) (protocol k) (insts k)
-           orderings (knon k) (kunique k)
+           orderings (knon k) (kpnon k) (kunique k) (kpriority k)
            (Generalized (Weakened p)) (prob k) (pov k)
 
 -- Origination assumption forgetting
@@ -1442,40 +1848,57 @@ weaken k p orderings =
 -- Delete each non-originating term that is not specified by a
 -- role.  Do the same for each uniquely-originating term.
 
-forgetAssumption :: Algebra t p g s e c => Preskel t p g s e c ->
-                    [Candidate t p g s e c] -> [Candidate t p g s e c]
-forgetAssumption k cs =
-    forgetNonTerm k (skelNons k) (forgetUniqueTerm k (skelUniques k) cs)
+forgetAssumption :: Algebra t p g s e c => Preskel t g s e ->
+                    [Candidate t p g s e c]
+forgetAssumption k =
+    forgetNonTerm k ++ forgetPnonTerm k ++ forgetUniqueTerm k
 
 -- Non-originating terms
 
-forgetNonTerm :: Algebra t p g s e c => Preskel t p g s e c -> [t] ->
-                    [Candidate t p g s e c] -> [Candidate t p g s e c]
-forgetNonTerm _ [] cs = cs
-forgetNonTerm k (t : ts) cs =
-    addIdentity k' : forgetNonTerm k ts cs
+forgetNonTerm :: Algebra t p g s e c => Preskel t g s e ->
+                 [Candidate t p g s e c]
+forgetNonTerm k =
+    map (addIdentity . delNon) (skelNons k)
     where
-      k' = k { knon = knon', operation = Generalized (Forgot t) }
-      knon' = L.delete t (knon k)
+      delNon t =
+          k { knon = L.delete t (knon k),
+              operation = Generalized (Forgot t) }
 
-skelNons :: Algebra t p g s e c => Preskel t p g s e c -> [t]
+skelNons :: Algebra t p g s e c => Preskel t g s e -> [t]
 skelNons k =
     filter (flip notElem ru) (knon k)
     where
       ru = [u | i <- insts k, u <- inheritRnon i]
 
+-- Penetrator non-originating terms
+
+forgetPnonTerm :: Algebra t p g s e c => Preskel t g s e ->
+                 [Candidate t p g s e c]
+forgetPnonTerm k =
+    map (addIdentity . delPnon) (skelPnons k)
+    where
+      delPnon t =
+          k { kpnon = L.delete t (kpnon k),
+              operation = Generalized (Forgot t) }
+
+skelPnons :: Algebra t p g s e c => Preskel t g s e -> [t]
+skelPnons k =
+    filter (flip notElem ru) (kpnon k)
+    where
+      ru = [u | i <- insts k, u <- inheritRpnon i]
+
 -- Uniquely-originating terms
 
-forgetUniqueTerm :: Algebra t p g s e c => Preskel t p g s e c -> [t] ->
-                    [Candidate t p g s e c] -> [Candidate t p g s e c]
-forgetUniqueTerm _ [] cs = cs
-forgetUniqueTerm k (t : ts) cs =
-    addIdentity k' : forgetUniqueTerm k ts cs
+forgetUniqueTerm :: Algebra t p g s e c => Preskel t g s e ->
+                    [Candidate t p g s e c]
+forgetUniqueTerm k =
+    map (addIdentity . delUniq) (skelUniques k)
     where
-      k' = k { kunique = kunique', operation = Generalized (Forgot t) }
-      kunique' = L.delete t (kunique k)
+      delUniq t =
+          k { kunique = L.delete t (kunique k),
+              operation = Generalized (Forgot t) }
 
-skelUniques :: Algebra t p g s e c => Preskel t p g s e c -> [t]
+skelUniques :: Algebra t p g s e c => Preskel t g s e -> [t]
 skelUniques k =
     filter (flip notElem ru) (kunique k)
     where
@@ -1510,10 +1933,12 @@ skelUniques k =
 --      to the unique's of K'
 --    add K' to the list of generated preskeletons
 
-separateVariables :: Algebra t p g s e c => Preskel t p g s e c ->
-                     [Candidate t p g s e c] -> [Candidate t p g s e c]
-separateVariables k cs =
-    foldr (separateVariable k (extractPlaces k)) cs (kvars k)
+separateVariables :: Algebra t p g s e c => Preskel t g s e ->
+                     [Candidate t p g s e c]
+separateVariables k =
+    do
+      v <- kvars k
+      separateVariable k (extractPlaces k) v
 
 -- A location is a strand, a role variable, and a position in the term
 -- associated with the role variable.
@@ -1523,42 +1948,33 @@ type Location t p g s e c = (Sid, t, p)
 -- Returns a list of pairs.  For each occurrence of a preskeleton
 -- variable in every instance, there is a pair where the first element
 -- is the variable, and the second as the location at which it occurs.
-extractPlaces :: Algebra t p g s e c => Preskel t p g s e c ->
+extractPlaces :: Algebra t p g s e c => Preskel t g s e ->
                  [(t, Location t p g s e c)]
 extractPlaces k =
-    foldl extractPlacesFromStrand [] (strands k)
+    [ (var, (sid s, v, p)) |
+      s <- strands k,
+      (v, t) <- instAssocs (inst s),
+      var <- foldVars (flip adjoin) [] t,
+      p <- places var t ]
 
-extractPlacesFromStrand :: Algebra t p g s e c =>
-                           [(t, Location t p g s e c)] ->
-                           Strand t p g s e c ->
-                           [(t, Location t p g s e c)]
-extractPlacesFromStrand ps s =
-    foldl (extractPlacesFromMaplet (sid s)) ps (instAssocs (inst s))
-
-instAssocs :: Algebra t p g s e c => Instance t p g s e c -> [(t, t)]
+instAssocs :: Algebra t p g s e c => Instance t e -> [(t, t)]
 instAssocs i =
     reify (rvars (role i)) (env i)
 
-extractPlacesFromMaplet :: Algebra t p g s e c => Sid ->
-                           [(t, Location t p g s e c)] -> (t, t) ->
-                           [(t, Location t p g s e c)]
-extractPlacesFromMaplet s ps (v, t) =
-    foldl f ps (foldVars (flip adjoin) [] t)
-    where
-      f ps var = foldl (g var) ps (places var t)
-      g var ps p = (var, (s, v, p)) : ps
-
 -- For each variable, generate candidates by generating a fresh
 -- variable for subsets of the locations associated with the variable.
-separateVariable :: Algebra t p g s e c => Preskel t p g s e c ->
+separateVariable :: Algebra t p g s e c => Preskel t g s e ->
                     [(t, Location t p g s e c)] -> t ->
-                    [Candidate t p g s e c] -> [Candidate t p g s e c]
-separateVariable k ps t cs =
+                    [Candidate t p g s e c]
+separateVariable k ps t =
     sepVar (locsFor ps t)
     where
-      sepVar [] = cs
-      sepVar [_] = cs
-      sepVar locs = foldr (changeLocations k env gen'' t') cs (parts locs)
+      sepVar [] = []
+      sepVar [_] = []
+      sepVar locs =
+          do
+            locs' <- parts locs
+            changeLocations k env gen'' t' locs'
       (gen'', env) = matchAlways t t' (gen', emptyEnv)
       parts locs = map (map (locs !!)) (subsets (length locs))
       (gen', t') = clone (gen k) t
@@ -1571,39 +1987,40 @@ locsFor ps t =
 
 matchAlways :: Algebra t p g s e c => t -> t -> (g, e) -> (g, e)
 matchAlways t t' env =
-      maybe envError id (match t t' env)
-      where
-        envError = error "Strand.matchAlways: bad match"
+    case match t t' env of
+      e : _ -> e
+      [] -> error "Strand.matchAlways: bad match"
 
 -- Change the given locations and create the resulting preskeleton
-changeLocations :: Algebra t p g s e c => Preskel t p g s e c ->
+changeLocations :: Algebra t p g s e c => Preskel t g s e ->
                    e -> g -> t -> [Location t p g s e c] ->
-                   [Candidate t p g s e c] -> [Candidate t p g s e c]
-changeLocations k env gen t locs cs =
-    addIdentity k0 : addIdentity k1 : cs
+                   [Candidate t p g s e c]
+changeLocations k env gen t locs =
+    [addIdentity k0, addIdentity k1]
     where
-      k0 = newPreskel gen' (protocol k) insts' (orderings k)
-           non unique0 (Generalized (Separated t)) (prob k) (pov k)
-      k1 = newPreskel gen' (protocol k) insts' (orderings k)
-           non unique1 (Generalized (Separated t)) (prob k) (pov k)
+      k0 = newPreskel gen' (protocol k) insts' (orderings k) non pnon unique0
+           (kpriority k) (Generalized (Separated t)) (prob k) (pov k)
+      k1 = newPreskel gen' (protocol k) insts' (orderings k) non pnon unique1
+           (kpriority k) (Generalized (Separated t)) (prob k) (pov k)
       (gen', insts') = changeStrands locs t gen (strands k)
       non = knon k ++ map (instantiate env) (knon k)
+      pnon = kpnon k ++ map (instantiate env) (kpnon k)
       unique0 = kunique k ++ unique'
       unique1 = map (instantiate env) (kunique k) ++ unique'
       -- Ensure all role unique assumptions are in.
       unique' = concatMap inheritRunique insts'
 
 changeStrands :: Algebra t p g s e c => [Location t p g s e c] -> t ->
-                 g -> [Strand t p g s e c] -> (g, [Instance t p g s e c])
+                 g -> [Strand t e] -> (g, [Instance t e])
 changeStrands locs copy gen strands =
-    maybe err id (foldMapM (changeStrand locs copy) gen strands)
-    where
-      err = error "Strand.changeStrands: bad strand build"
+    case foldMapM (changeStrand locs copy) gen strands of
+      i : _ -> i
+      [] -> error "Strand.changeStrands: bad strand build"
 
 -- Create an new environment incorporating changes, and from that,
 -- create the new strand.
 changeStrand :: Algebra t p g s e c => [Location t p g s e c] ->
-                t -> g -> Strand t p g s e c -> Maybe (g, Instance t p g s e c)
+                t -> g -> Strand t e -> [(g, Instance t e)]
 changeStrand locs copy gen s =
     bldInstance (role i) trace'  gen'
     where
@@ -1635,19 +2052,19 @@ subsets n
 
 -- Collapse a shape by unifying strands.
 
-collapse :: Algebra t p g s e c => Preskel t p g s e c ->
-            [Preskel t p g s e c]
+collapse :: Algebra t p g s e c => Preskel t g s e ->
+            [Preskel t g s e]
 collapse k =
     [k' | s <- strandids k, s' <- nats s,
-          k' <- M.maybeToList $ collapseStrands k s s']
+          k' <- collapseStrands k s s']
 
-collapseStrands :: Algebra t p g s e c => Preskel t p g s e c ->
-                   Sid -> Sid -> Maybe (Preskel t p g s e c)
+collapseStrands :: Algebra t p g s e c => Preskel t g s e ->
+                   Sid -> Sid -> [Preskel t g s e]
 collapseStrands k s s' =
     do
       (s, s', subst) <- unifyStrands k s s'
-      prs <- ksubst (k { operation = Collapsed s s' },
-                     (0, 0), emptySubst) subst
-      prs <- compress prs s s'
-      (k, _, _) <- hull True prs
-      return k
+      prs <- ksubst False (k, k { operation = Collapsed s s' },
+                           (0, 0), strandids k, emptySubst) subst
+      prs <- compress True prs s s'
+      prs <- skeletonize usePruningDuringCollapsing prs
+      return $ skel prs

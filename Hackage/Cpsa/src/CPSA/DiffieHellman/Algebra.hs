@@ -1,4 +1,8 @@
--- Diffie-Hellman Algebra implementation
+-- Experimental Diffie-Hellman Algebra implementation
+
+-- This module is an experimental version of Diffie-Hellman in which
+-- exponents form an Abelian group.  There are many issues to be
+-- resolved before this version of Diffie-Hellman can be used.
 
 -- The module implements a many-sorted algebra, but is used as an
 -- order-sorted algebra.  It exports a name, and the origin used to
@@ -29,7 +33,7 @@ import qualified CPSA.DiffieHellman.IntLinEq as I
 import System.IO.Unsafe
 
 z :: Show a => a -> b -> b
-z x y = seq (unsafePerformIO (print x)) y
+z x y = unsafePerformIO (print x >> return y)
 
 zz :: Show a => a -> a
 zz x = z x x
@@ -47,10 +51,58 @@ zt x True = z x True
 zt _ y = y
 --}
 
-{-- Export iUnify and iMatch for GHCi for debugging
+{- Export iUnify and iMatch for GHCi for debugging
+
+For this to work, you must install the package bytestring-handle from
+Hackage and tell GHCi that it is not hidden on the command line or
+within GHCi with:
+
+:set -package bytestring-handle
+
+-}
+
+{--
+import System.IO (Handle)
+import Data.ByteString.Lazy.Char8 (pack)
+import Data.ByteString.Handle
+import Control.Exception (try)
+import System.IO.Unsafe
+
+stringHandle :: String -> IO Handle
+stringHandle s = readHandle False (pack s)
+
+stringPosHandle :: String -> IO C.PosHandle
+stringPosHandle s =
+    do
+      h <- stringHandle s
+      C.posHandle "" h
+
+stringLoad :: String -> IO [SExpr Pos]
+stringLoad s =
+    do
+      h <- stringPosHandle s
+      loop h []
+    where
+      loop h xs =
+          do
+            x <- C.load h
+            case x of
+              Nothing ->
+                return $ reverse xs
+              Just x ->
+                loop h (x : xs)
+
+sLoad :: String -> Maybe [SExpr Pos]
+sLoad s =
+    unsafePerformIO (stringLoad s >>= return . Just)
+
+-- Test unification
+
 iUnify :: String -> String -> String -> Maybe Subst
 iUnify vars t t' =
     iRun unify emptySubst vars t t'
+
+-- Test matching
 
 iMatch :: String -> String -> String -> Maybe Env
 iMatch vars t t' =
@@ -60,9 +112,9 @@ iRun :: (Term -> Term -> (Gen, a) -> Maybe (Gen, a)) -> a ->
         String -> String -> String -> Maybe a
 iRun f mt vars t t' =
     do
-      vars <- C.load "" vars
-      [t] <- C.load "" t
-      [t'] <- C.load "" t'
+      vars <- sLoad vars
+      [t] <- sLoad t
+      [t'] <- sLoad t'
       (gen, vars) <- loadVars origin vars
       t <- loadTerm vars t
       t' <- loadTerm vars t'
@@ -86,7 +138,7 @@ gUnify t t' r@(g, _) = gRun g (F Cat [t, t']) (unify t t' r)
 --}
 
 name :: String
-name = "diffie-hellman"
+name = "experimental-diffie-hellman"
 
 -- An identifier
 
@@ -127,6 +179,10 @@ isGroupVar :: Group -> Bool
 isGroupVar t =
     M.size t == 1 && head (M.elems t) == 1
 
+-- Assumes isGroupVar t == True!
+getGroupVar :: Group -> Id
+getGroupVar x = head $ M.keys x
+
 groupVar :: Id -> Term
 groupVar x = G $ M.singleton x 1
 
@@ -140,7 +196,7 @@ expg t n = M.map (* n) t
 
 mul :: Group -> Group -> Group
 mul t t' =
-    M.foldrWithKey f t' t      -- Fold over the mappings in t
+    M.foldrWithKey f t' t       -- Fold over the mappings in t
     where
       f x c t =                 -- Alter the mapping of
           M.alter (g c) x t     -- variable x in t
@@ -262,7 +318,7 @@ isVar (I _) = True           -- Sort: mesg
 isVar (F s [I _]) =
     -- Sorts: text, data, name, skey, and akey
     s == Text || s == Data || s == Name || s == Skey || s == Akey || s == Base
-isVar (G t) = isGroupVar t
+isVar (G x) = isGroupVar x
 isVar _ = False
 
 -- Extract the identifier from a variable
@@ -274,8 +330,12 @@ varId (F Name [I x]) = x
 varId (F Skey [I x]) = x
 varId (F Akey [I x]) = x
 varId (F Base [I x]) = x
-varId (G t) | isGroupVar t = head $ M.keys t
+varId (G x) | isGroupVar x = getGroupVar x
 varId _ = error "Algebra.varId: term not a variable with its sort"
+
+isMesgVar :: Term -> Bool
+isMesgVar (I _) = True
+isMesgVar _ = False
 
 -- A list of terms are well-formed if each one has the correct
 -- structure and every occurrence of an identifier in a term has the
@@ -368,7 +428,7 @@ isAtom :: Term -> Bool
 isAtom (I _) = False
 isAtom (C _) = False
 isAtom (F s _) =
-    s == Text || s == Data || s == Name || s == Skey || s == Akey || s == Base
+    s == Text || s == Data || s == Name || s == Skey || s == Akey
 isAtom (G _) = True
 
 -- Does a term occur in another term?
@@ -430,6 +490,8 @@ foldCarriedTerms f acc t@(F Cat [t0, t1]) = -- Concatenation
     foldCarriedTerms f (foldCarriedTerms f (f acc t) t0) t1
 foldCarriedTerms f acc t@(F Enc [t0, _]) = -- Encryption
     foldCarriedTerms f (f acc t) t0
+foldCarriedTerms f acc t@(F Base [F Exp [_, t1]]) = -- Exponents
+    f (f acc t) t1
 foldCarriedTerms f acc t = f acc t     -- atoms and tags
 
 -- Is a term carried by another term?
@@ -451,12 +513,64 @@ buildable knowns unguessable term =
     ba term
     where
       ba (I _) = True           -- A mesg sorted variable is always buildable
-      ba (C _) = True           -- and so is a tag
+      ba (C _) = True           -- So is a tag
       ba (F Cat [t0, t1]) =
           ba t0 && ba t1
       ba t@(F Enc [t0, t1]) =
           S.member t knowns || ba t0 && ba t1
+      ba (F Base [t]) = bb t
       ba t = isAtom t && not (S.member t unguessable)
+      -- Buildable base term
+      bb (I _) = True           -- A variable of sort base is always buildable
+      bb (F Genr []) = True     -- and so in the generator
+      bb t@(F Exp [t0, G t1]) =
+          S.member (F Base [t]) knowns || ba t0 && be t1
+      bb (_) = False
+      -- Buildable exponent
+      be t =
+          -- This is a hack.  One should really solve a
+          -- linear equation here
+          any (instOf $ stripExpn ids t) kns
+      -- Exponent variables with origination assumptions
+      ids = getExpnOrigAssumptions unguessable
+      -- Known exponent without non-known variables
+      kns = map (stripExpn ids) (getExpns knowns)
+
+getExpnOrigAssumptions :: Set Term -> [Id]
+getExpnOrigAssumptions terms =
+    concatMap f $ S.elems terms
+    where
+      f (G t) = M.keys t        -- This is an approximation
+      f _ = []
+
+stripExpn :: [Id] -> Group -> Group
+stripExpn ids grp =
+    foldl f grp $ M.keys grp
+    where
+      f grp key
+          | notElem key ids = M.delete key grp
+          | otherwise = grp
+
+getExpns :: Set Term -> [Group]
+getExpns terms =
+    foldl f [M.empty] $ S.elems terms
+    where
+      f a (G t) = t:a
+      f a _ = a
+
+termGen :: Group -> Gen
+termGen t =
+    Gen (1 + maxl (map idInt (M.keys t)))
+    where
+      idInt (Id (i, _)) = i
+      maxl [] = 0
+      maxl xs = maximum xs
+
+instOf :: Group -> Group -> Bool
+instOf grp pat =
+    maybe False (const True) (match (G pat) (G grp) (gen, emptyEnv))
+    where
+      gen = mash (termGen grp) (termGen pat)
 
 -- Compute the decomposition given some known terms and some unguessable
 -- atoms.  The code is quite tricky.  It iterates until the known
@@ -475,6 +589,14 @@ decompose knowns unguessable =
           | buildable knowns unguessable (inv t1) = -- Add plaintext
               loop unguessable (decat t0 knowns) old todo
           | otherwise = loop unguessable knowns old todo
+      -- New case here: don't delete exponentiated values
+      loop unguessable knowns old (F Base [F Exp [_, _]] : todo) =
+          loop unguessable knowns old todo
+      --  New case here: don't delete exponents that
+      -- aren't in unguessable
+      loop unguessable knowns old (t@(G _) : todo)
+          | S.notMember t unguessable =
+              loop unguessable knowns old todo
       loop unguessable knowns old (t : todo) =
           loop (S.delete t unguessable) (S.delete t knowns) old todo
       -- Decat
@@ -490,14 +612,16 @@ inv t = t
 
 -- Extracts every encryption that is carried by a term along with its
 -- encryption key.
-encryptions :: Term -> [(Term, Term)]
+encryptions :: Term -> [(Term, [Term])]
 encryptions t =
     reverse $ loop t []
     where
       loop (F Cat [t, t']) acc =
           loop t' (loop t acc)
       loop t@(F Enc [t', t'']) acc =
-          loop t' (adjoin (t, t'') acc)
+          loop t' (adjoin (t, [t'']) acc)
+      loop t@(F Base [F Exp [_, t'']]) acc =
+          adjoin (t, [t'']) acc
       loop _ acc = acc
       adjoin x xs
           | x `elem` xs = xs
@@ -513,7 +637,7 @@ protectors derivable target source =
       return $ S.elems ts
     where
       bare source _
-           | source == target = Nothing
+          | source == target = Nothing
       bare (F Cat [t, t']) acc =
           maybe Nothing (bare t') (bare t acc)
       bare t@(F Enc [t', key]) acc =
@@ -524,6 +648,8 @@ protectors derivable target source =
                   Just (S.insert t acc)
           else
               Just acc
+      bare t@(F Base [F Exp [_, t'']]) acc
+          | target == t'' = Just (S.insert t acc)
       bare _ acc = Just acc
 
 -- Support for data flow analysis of traces.  A flow rule maps an
@@ -569,6 +695,7 @@ inFlow t (initial, available) =
 
 instance C.Term Term where
     isVar = isVar
+    isMesgVar = isMesgVar
     isAtom = isAtom
     termsWellFormed = termsWellFormed
     occursIn = occursIn
@@ -592,6 +719,9 @@ instance C.Term Term where
 -- application on the path to the named subterm.  The integer is the
 -- index of the subterm in the application's list of terms.
 
+-- The places and replace code fail to find the variable
+-- (F Akey [I x]) in (F Akey [Invk [I x]]).
+
 newtype Place = Place [Int] deriving Show
 
 -- Returns the places a variable occurs within a term.
@@ -612,11 +742,9 @@ places var source =
 
 linearize :: Group -> [Id]
 linearize t =
-    concatMap f (M.assocs t)
-    where
-      f (x, n)
-          | n >= 0 = replicate n x
-          | otherwise = replicate (negate n) x
+    do
+      (x, n) <- M.assocs t
+      replicate (if n >= 0 then n else negate n) x
 
 groupPlaces ::  Id -> [Place] -> [Int] -> Int -> [Id] -> [Place]
 groupPlaces _ paths _ _ [] = paths
@@ -637,6 +765,8 @@ carriedPlaces target source =
 	  f (f paths  (0 : path) t) (1 : path) t'
       f paths path (F Enc [t, _]) =
 	  f paths (0 : path) t
+      f paths path (F Base [F Exp [_, t]]) =
+	  f paths (1 : 0 : path) t
       f paths _ _ = paths
 
 -- Replace a variable within a term at a given place.
@@ -653,11 +783,11 @@ replace var (Place ints) source =
 
 factors :: Group -> [(Id, Int)]
 factors t =
-    concatMap f (M.assocs t)
-    where
-      f (x, n)
-          | n >= 0 = replicate n (x, 1)
-          | otherwise = replicate (negate n) (x, -1)
+    do
+      (x, n) <- M.assocs t
+      case n >= 0 of
+        True -> replicate n (x, 1)
+        False -> replicate (negate n) (x, -1)
 
 groupReplace :: Id -> Int -> [(Id, Int)] -> Term
 groupReplace x i factors =
@@ -777,6 +907,19 @@ showMap m =
 
 -- Unification and substitution
 
+-- The rewrite rules used are:
+--
+-- (vars (h base) (x y expn))
+--
+-- 1.  ((exp h x) y) ==> (exp h (mul x y))
+-- 2.  (exp h (one)) ==> h
+-- 3.  unify((exp(h, x)), (exp(h, y)), s) ==>
+--         unify(x, y, s)
+-- 4   unify((exp(h, x)), (exp((gen), y)), s) ==>
+--         unify(h, (exp gen (mul y (rec x))), s)
+-- 5.  unify((exp((gen), x)), (exp(h, y)), s) ==>
+--         unify((exp(h, x)), (exp((gen), y)), s)
+
 newtype Subst = Subst IdMap deriving (Eq, Ord)
 
 instance Show Subst where
@@ -840,10 +983,13 @@ chaseExp s t0 t1
 chaseExp s (I x) t1 =
     case chase s (I x) of
       F Exp [t0', G t1'] -> chaseExp s t0' (mul t1 t1')
-      t0 -> F Exp [t0, G t1]
+      t0 -> F Exp [t0, chaseGroup s t1]
 chaseExp s (F Exp [t0', G t1']) t1 =
     chaseExp s t0' (mul t1 t1')
-chaseExp _ t0 t1 = F Exp [t0, G t1]
+chaseExp s t0 t1 = F Exp [t0, chaseGroup s t1]
+
+chaseGroup :: Subst -> Group -> Term
+chaseGroup (Subst s) x = G $ groupSubst s x
 
 -- Does x occur in t?
 occurs :: Id -> Term -> Bool
@@ -956,31 +1102,11 @@ expChase subst t0 t1 =
 groupChase :: Subst -> Group -> Group
 groupChase (Subst subst) t = groupSubst subst t
 
--- more general than relation
--- s0 `lte` s1 if s1 = compose s2 s0 for some s2
-moreGeneral :: (Gen, Subst) -> (Gen, Subst) -> Bool
-moreGeneral (gen0, Subst s0) (gen1, Subst s1) =
-    let dom = S.elems $ foldl idSet (M.keysSet s0) (M.elems s0)
-        env = foldl (flip M.delete) s1 (M.keys s0) in
-    loop dom (mash gen0 gen1, Env (S.empty, env))
-    where
-      loop [] _ = True
-      loop (x : xs) env =
-          maybe False (loop xs) (match (get x s0) (get x s1) env)
-      get x env = M.findWithDefault (I x) x env
-
-idSet :: Set Id -> Term -> Set Id
-idSet set (I id) = S.insert id set
-idSet set (C _) = set
-idSet set (F _ u) = foldl idSet set u
-idSet set (G t) = S.union (M.keysSet t) set
-
 instance C.Subst Term Gen Subst where
    emptySubst = emptySubst
    substitute = substitute
-   unify = unify
+   unify t t' s = maybe [] (: []) $ unify t t' s
    compose = compose
-   moreGeneral = moreGeneral
 
 -- Matching and instantiation
 
@@ -997,6 +1123,9 @@ instance Show Env where
 -- generated by matching and should be treated as variables when using
 -- unification to perform matching.  The other variables in the range
 -- are treated as constants.
+
+-- An environment contains an IdMap and the set of variables
+-- generated while matching.
 
 emptyEnv :: Env
 emptyEnv = Env (S.empty, emptyIdMap)
@@ -1017,15 +1146,12 @@ match (I x) t (g, Env (v, r)) =
       Nothing -> Just (g, Env (v, M.insert x t r))
       Just t' -> if t == t' then Just (g, Env (v, r)) else Nothing
 match (C c) (C c') r = if c == c' then Just r else Nothing
-match (F Invk [I x]) (F Pubk [I y]) r =
-    match (I x) (F Invk [F Pubk [I y]]) r
-match (F Invk [I x]) (F Pubk [C c, I y]) r =
-    match (I x) (F Invk [F Pubk [C c, I y]]) r
 match (F Exp [t0, G t1]) (F Exp [t0', G t1']) r
       = matchExp t0 t1 t0' t1' r
 match (F s u) (F s' u') r
     | s == s' = matchLists u u' r
-    | otherwise = Nothing
+match (F Invk [t]) t' r =
+    match t (F Invk [t']) r
 match (G t) (G t') (g, Env (v, r)) =
     do
       let (t0, t0') = merge t t' r
@@ -1066,28 +1192,28 @@ merge t t' r =
 matchGroup ::  Group -> Group -> Set Id -> Gen -> Maybe (Set Id, Gen, IdMap)
 matchGroup t0 t1 v g =
     case partition t0 t1 v of
-      (_, [], []) -> return (v, g, emptyIdMap)
-      (_, [], _) -> Nothing
-      (n, t0, t1) ->
+      ([], []) -> return (v, g, emptyIdMap)
+      ([], _) -> Nothing
+      (t0, t1) ->
           do
             subst <- I.intLinEq (map snd t0, map snd t1)
-            return $ mgu v n (map fst t0) (map fst t1) subst g
+            return $ mgu v (map fst t0) (map fst t1) subst g
 
 type Coeff = [(Id, Int)]
 
 -- Move variables on the RHS of the equation to the LHS
-partition ::  Group -> Group -> Set Id -> (Int, Coeff, Coeff)
+partition ::  Group -> Group -> Set Id -> (Coeff, Coeff)
 partition t0 t1 v =
-    (length v0, v0 ++ map (\(x,n) -> (x, negate n)) v1, c1)
+    (v0 ++ map (\(x,n) -> (x, negate n)) v1, c1)
     where
       v0 = M.assocs t0
       (v1, c1) = L.partition f (M.assocs t1)
       f (x, _) = S.member x v
 
-mgu :: Set Id -> Int -> [Id] -> [Id] -> I.Subst -> Gen -> (Set Id, Gen, IdMap)
-mgu v _ _ _ [] gen = (v, gen, emptyIdMap)
-mgu v n vars syms subst gen =
-    (v', gen', foldl f emptyIdMap (zip vars [0..(n - 1)]))
+mgu :: Set Id -> [Id] -> [Id] -> I.Subst -> Gen -> (Set Id, Gen, IdMap)
+mgu v _ _ [] gen = (v, gen, emptyIdMap)
+mgu v vars syms subst gen =
+    (v', gen', foldl f emptyIdMap (zip vars [0..]))
     where
       (gen', genSyms) = genVars vars (length (fst (snd (head subst)))) gen
       v' = foldl (flip S.insert) v genSyms
@@ -1118,8 +1244,8 @@ genVars vars n g =
 
 -- Does every varible in ts not occur in the domain of e?
 -- Trivial bindings in e are ignored.
-idempotentEnvFor :: GenEnv -> [Term] -> Maybe GenEnv
-idempotentEnvFor ge ts =
+identityEnvFor :: GenEnv -> [Term] -> Maybe GenEnv
+identityEnvFor ge ts =
     let env@(_, Env (_, r)) = nonTrivialEnv ge in
     if all (allId $ flip S.notMember $ M.keysSet r) ts then
         Just env
@@ -1132,6 +1258,8 @@ allId _ (C _) = True
 allId f (F _ u) = all (allId f) u
 allId f (G t) = all f (M.keys t)
 
+-- Eliminate all trivial bindings so that an environment can be used
+-- as a substitution.
 nonTrivialEnv :: GenEnv -> GenEnv
 nonTrivialEnv (g, Env (v, r)) =
     nonGroupEnv (M.assocs r) M.empty []
@@ -1152,13 +1280,23 @@ groupEnv g v env grp [] =
 groupEnv g v env grp ((x, t):map)
     | M.lookup x t /= Just 1 = groupEnv g v env grp map
     | otherwise =
-        let (_, t0, t1) = partition M.empty (mul t (M.singleton x (-1))) v in
+        let (t0, t1) = partition M.empty (mul t (M.singleton x (-1))) v in
         case matchGroup (group t0) (group t1) S.empty g of
           Nothing -> groupEnv g v env grp map
           Just (v', g', subst) ->
               let grp' = L.delete (x, t) grp
                   grp'' = L.map (\(x, t) -> (x, groupSubst subst t)) grp' in
               groupEnv g' (S.union v' v) env grp'' grp''
+
+-- Specialize an environment by mapping the generated variables to one.
+specialize :: Env -> Env
+specialize (Env (v, r)) =
+    Env (S.empty, M.foldrWithKey f M.empty r)
+    where
+      f x t r = M.insert x (instantiate special t) r
+      -- Environment mapping generated variables to one
+      special = Env (S.empty, S.fold g M.empty v)
+      g x r = M.insert x (G M.empty) r
 
 -- Cast an environment into a substitution by filtering out trivial
 -- bindings.
@@ -1223,7 +1361,7 @@ groupMatchRenaming v gen map =
 
 groupMatchElim :: Set Id -> Gen -> Map Id Group -> Group -> (Id, Int) -> Bool
 groupMatchElim v gen ge t (x, 1) =
-    let (_, t0, t1) = partition M.empty (mul t (M.singleton x (-1))) v in
+    let (t0, t1) = partition M.empty (mul t (M.singleton x (-1))) v in
     case matchGroup (group t0) (group t1) S.empty gen of
       Nothing -> False
       Just (v', gen', subst) ->
@@ -1233,8 +1371,9 @@ groupMatchElim _ _ _ _ _ = False
 instance C.Env Term Gen Subst Env where
    emptyEnv = emptyEnv
    instantiate = instantiate
-   match = match
-   idempotentEnvFor = idempotentEnvFor
+   match t t' e = maybe [] (: []) $ match t t' e
+   identityEnvFor e ts = maybe [] (: []) $ identityEnvFor e ts
+   specialize = specialize
    substitution = substitution
    reify = reify
    matchRenaming = matchRenaming
@@ -1540,6 +1679,12 @@ displayEnc :: Context -> Term -> Term -> [SExpr ()]
 displayEnc ctx (F Cat [t0, t1]) t = displayTerm ctx t0 : displayEnc ctx t1 t
 displayEnc ctx t0 t1 = [displayTerm ctx t0, displayTerm ctx t1]
 
+displayEnv :: Context -> Context -> Env -> [SExpr ()]
+displayEnv ctx ctx' (Env (_, r)) =
+    map (\(x, t) -> L () [displayTerm ctx x, displayTerm ctx' t]) r'
+    where
+      r' = map (\(x, t) -> (I x, inferSort t)) $ M.assocs r
+
 -- displaySubst c s displays a substitution s in context c, where some
 -- variables that occur in s might not be in c.  Enough sort
 -- inference is performed so as to allow the extension of the context.
@@ -1624,6 +1769,7 @@ instance C.Context Term Gen Subst Env Context where
     addToContext = addToContext
     displayVars = displayVars
     displayTerm = displayTerm
+    displayEnv = displayEnv
     displaySubst = displaySubst
 
 instance C.Algebra Term Place Gen Subst Env Context

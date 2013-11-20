@@ -1,5 +1,8 @@
-(comment "CPSA 2.1.0")
-(comment "All input read")
+(herald "Electronic Purchase with Money Order Protocol"
+  (comment "Annotated with trust management formulas"))
+
+(comment "CPSA 2.3.1")
+(comment "All input read from epmo.scm")
 
 (defprotocol epmo basic
   (defrole bank
@@ -32,16 +35,16 @@
     (non-orig (invk hash))
     (uniq-orig nc)
     (annotations c
-      (2
+      (1
         (says m
           (forall ((pb name))
             (implies (transfer pb price m nm) (ship m goods c)))))
-      (4
+      (3
         (says b
           (implies
             (and (forall ((pm name)) (says c (transfer b price pm nm)))
               (forall ((pm name)) (says m (transfer b price pm nm))))
-            (transfer b price pm nm)))) (5 (transfer b price m nm))))
+            (transfer b price m nm)))) (4 (transfer b price m nm))))
   (defrole merchant
     (vars (b c m name) (hash akey) (nb nc nm data) (goods price text))
     (trace (recv (enc c nc goods price (pubk m)))
@@ -51,19 +54,19 @@
     (non-orig (invk hash))
     (uniq-orig nm)
     (annotations m
-      (2
+      (1
         (forall ((pb name))
           (implies (transfer pb price m nm) (ship m goods c))))
-      (3
+      (2
         (and
           (says b
             (implies
               (and
                 (forall ((pm name)) (says c (transfer b price pm nm)))
                 (forall ((pm name)) (says m (transfer b price pm nm))))
-              (transfer b price pm nm)))
+              (transfer b price m nm)))
           (says c (transfer b price m nm))))
-      (4 (and (transfer b price m nm) (ship m goods c))))))
+      (3 (and (transfer b price m nm) (ship m goods c))))))
 
 (defskeleton epmo
   (vars (goods price text) (nb nc nm data) (b c m name) (hash akey))
@@ -81,6 +84,7 @@
       (send (cat (enc (enc c nc nb nm price hash) (privk b)) nb))))
   (label 0)
   (unrealized (0 1) (0 3))
+  (origs (nc (0 0)))
   (comment "1 in cohort - 1 not yet seen"))
 
 (defskeleton epmo
@@ -179,7 +183,7 @@
   (precedes ((0 0) (1 0)) ((0 2) (2 0)) ((1 1) (0 1)) ((2 1) (0 3)))
   (non-orig (invk hash) (privk b) (privk c) (privk m))
   (uniq-orig nb nc nm)
-  (operation nonce-test (added-strand customer 3) nc (2 0)
+  (operation nonce-test (displaced 3 0 customer 3) nc (2 0)
     (enc nc nm m goods price (pubk c)) (enc c nc goods price (pubk m)))
   (traces
     ((send (enc c nc goods price (pubk m)))
@@ -198,7 +202,12 @@
   (label 4)
   (parent 3)
   (unrealized)
-  (shape))
+  (shape)
+  (maps
+    ((0)
+      ((b b) (c c) (m m) (hash hash) (nb nb) (nc nc) (nm nm)
+        (goods goods) (price price))))
+  (origs (nc (0 0)) (nb (2 1)) (nm (1 1))))
 
 (comment "Nothing left to do")
 
@@ -233,16 +242,16 @@
     (non-orig (invk hash))
     (uniq-orig nc)
     (annotations c
-      (2
+      (1
         (says m
           (forall ((pb name))
             (implies (transfer pb price m nm) (ship m goods c)))))
-      (4
+      (3
         (says b
           (implies
             (and (forall ((pm name)) (says c (transfer b price pm nm)))
               (forall ((pm name)) (says m (transfer b price pm nm))))
-            (transfer b price pm nm)))) (5 (transfer b price m nm))))
+            (transfer b price m nm)))) (4 (transfer b price m nm))))
   (defrole merchant
     (vars (b c m name) (hash akey) (nb nc nm data) (goods price text))
     (trace (recv (enc c nc goods price (pubk m)))
@@ -252,19 +261,19 @@
     (non-orig (invk hash))
     (uniq-orig nm)
     (annotations m
-      (2
+      (1
         (forall ((pb name))
           (implies (transfer pb price m nm) (ship m goods c))))
-      (3
+      (2
         (and
           (says b
             (implies
               (and
                 (forall ((pm name)) (says c (transfer b price pm nm)))
                 (forall ((pm name)) (says m (transfer b price pm nm))))
-              (transfer b price pm nm)))
+              (transfer b price m nm)))
           (says c (transfer b price m nm))))
-      (4 (and (transfer b price m nm) (ship m goods c))))))
+      (3 (and (transfer b price m nm) (ship m goods c))))))
 
 (defskeleton epmo
   (vars (price text) (nc nm nb data) (b c m name) (hash akey))
@@ -280,6 +289,7 @@
       (recv (enc (enc b nb nm hash) (privk m)))))
   (label 5)
   (unrealized (0 2))
+  (origs (nb (0 1)))
   (comment "1 in cohort - 1 not yet seen"))
 
 (defskeleton epmo
@@ -318,8 +328,8 @@
   (precedes ((0 1) (1 2)) ((1 1) (0 0)) ((1 3) (0 2)))
   (non-orig (invk hash) (privk b) (privk c) (privk m))
   (uniq-orig nm nb)
-  (operation encryption-test (added-strand bank 2)
-    (enc (enc c nc nb nm price hash) (privk b)) (1 2))
+  (operation encryption-test (displaced 2 0 bank 2)
+    (enc (enc c-0 nc-0 nb nm price-0 hash) (privk b)) (1 2))
   (traces
     ((recv (enc c nc nm price (pubk b)))
       (send
@@ -420,7 +430,7 @@
     ((2 2) (0 0)) ((2 4) (1 2)))
   (non-orig (invk hash) (privk b) (privk c) (privk m))
   (uniq-orig nc nm nb)
-  (operation nonce-test (added-strand customer 3) nm (0 0)
+  (operation nonce-test (displaced 3 2 customer 3) nm (0 0)
     (enc nc nm m goods price (pubk c)))
   (traces
     ((recv (enc c nc nm price (pubk b)))
@@ -442,7 +452,12 @@
   (label 10)
   (parent 9)
   (unrealized)
-  (shape))
+  (shape)
+  (maps
+    ((0)
+      ((b b) (c c) (m m) (hash hash) (nc nc) (nm nm) (nb nb)
+        (price price))))
+  (origs (nc (2 0)) (nb (0 1)) (nm (1 1))))
 
 (comment "Nothing left to do")
 
@@ -477,16 +492,16 @@
     (non-orig (invk hash))
     (uniq-orig nc)
     (annotations c
-      (2
+      (1
         (says m
           (forall ((pb name))
             (implies (transfer pb price m nm) (ship m goods c)))))
-      (4
+      (3
         (says b
           (implies
             (and (forall ((pm name)) (says c (transfer b price pm nm)))
               (forall ((pm name)) (says m (transfer b price pm nm))))
-            (transfer b price pm nm)))) (5 (transfer b price m nm))))
+            (transfer b price m nm)))) (4 (transfer b price m nm))))
   (defrole merchant
     (vars (b c m name) (hash akey) (nb nc nm data) (goods price text))
     (trace (recv (enc c nc goods price (pubk m)))
@@ -496,19 +511,19 @@
     (non-orig (invk hash))
     (uniq-orig nm)
     (annotations m
-      (2
+      (1
         (forall ((pb name))
           (implies (transfer pb price m nm) (ship m goods c))))
-      (3
+      (2
         (and
           (says b
             (implies
               (and
                 (forall ((pm name)) (says c (transfer b price pm nm)))
                 (forall ((pm name)) (says m (transfer b price pm nm))))
-              (transfer b price pm nm)))
+              (transfer b price m nm)))
           (says c (transfer b price m nm))))
-      (4 (and (transfer b price m nm) (ship m goods c))))))
+      (3 (and (transfer b price m nm) (ship m goods c))))))
 
 (defskeleton epmo
   (vars (goods price text) (nb nc nm data) (b c m name) (hash akey))
@@ -523,6 +538,7 @@
       (send (enc (enc b nb nm hash) (privk m)))))
   (label 11)
   (unrealized (0 2))
+  (origs (nm (0 1)))
   (comment "1 in cohort - 1 not yet seen"))
 
 (defskeleton epmo
@@ -592,7 +608,7 @@
     ((2 4) (0 2)))
   (non-orig (invk hash) (privk b) (privk c) (privk m))
   (uniq-orig nb nc nm)
-  (operation nonce-test (added-strand customer 5) nb (0 2)
+  (operation nonce-test (displaced 2 3 customer 5) nb (0 2)
     (enc nc nb (pubk c)) (enc c nc nb nm price hash))
   (traces
     ((recv (enc c nc goods price (pubk m)))
@@ -613,6 +629,11 @@
   (label 14)
   (parent 13)
   (unrealized)
-  (shape))
+  (shape)
+  (maps
+    ((0)
+      ((b b) (c c) (m m) (hash hash) (nb nb) (nc nc) (nm nm)
+        (goods goods) (price price))))
+  (origs (nc (2 0)) (nb (1 1)) (nm (0 1))))
 
 (comment "Nothing left to do")

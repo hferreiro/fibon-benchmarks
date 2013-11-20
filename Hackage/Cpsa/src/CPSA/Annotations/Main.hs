@@ -12,16 +12,19 @@
 module Main (main) where
 
 import System.IO
-import System.IO.Error
 import CPSA.Lib.CPSA
 import CPSA.Lib.Entry
 import CPSA.Annotations.Annotations
 import qualified CPSA.Basic.Algebra
 import qualified CPSA.DiffieHellman.Algebra
+import qualified CPSA.DiffieHellmanNoReciprocal.Algebra
+import qualified CPSA.SimpleDiffieHellman.Algebra
 
 -- Algebra names
 algs :: [String]
-algs = [CPSA.Basic.Algebra.name, CPSA.DiffieHellman.Algebra.name]
+algs = [CPSA.Basic.Algebra.name, CPSA.DiffieHellman.Algebra.name,
+        CPSA.DiffieHellmanNoReciprocal.Algebra.name,
+        CPSA.SimpleDiffieHellman.Algebra.name]
 
 main :: IO ()
 main =
@@ -37,6 +40,13 @@ main =
               go (step h alg CPSA.Basic.Algebra.origin margin) p []
           | alg == CPSA.DiffieHellman.Algebra.name ->
               go (step h alg CPSA.DiffieHellman.Algebra.origin margin) p []
+          | alg == CPSA.DiffieHellmanNoReciprocal.Algebra.name ->
+              go (step h alg
+                       CPSA.DiffieHellmanNoReciprocal.Algebra.origin margin)
+                 p []
+          | alg == CPSA.SimpleDiffieHellman.Algebra.name ->
+              go (step h alg CPSA.SimpleDiffieHellman.Algebra.origin margin)
+                 p []
           | otherwise ->
                abort ("Bad algebra: " ++ alg)
       hClose h
@@ -57,15 +67,15 @@ go f p a =
                     loop a
 
 step :: Algebra t p g s e c => Handle ->
-        String -> g -> Int -> [Prot t p g s e c] ->
-        SExpr Pos -> IO [Prot t p g s e c]
+        String -> g -> Int -> [Prot t g] ->
+        SExpr Pos -> IO [Prot t g]
 step output name origin margin ps sexpr =
     do
-      x <- try (annotations name origin ps sexpr)
+      x <- tryIO (annotations name origin ps sexpr)
       case x of
         Right (ps, sexpr) ->
             do
               writeLnSEexpr output margin sexpr
               return ps
         Left err ->
-            abort (ioeGetErrorString err)
+            abort (show err)

@@ -1,4 +1,4 @@
-;;; Needham-Schroeder Protocol
+(herald "Needham-Schroeder Public-Key Protocol Variants")
 
 (defprotocol ns basic
   (defrole init
@@ -22,6 +22,15 @@
   (non-orig (privk b) (privk a))
   (uniq-orig n1)
   (comment "Initiator point-of-view"))
+
+;;; Double initiator point-of-view
+(defskeleton ns
+  (vars (a b name) (n1 n1-0 text))
+  (defstrand init 3 (a a) (b b) (n1 n1))
+  (defstrand init 3 (a a) (b b) (n1 n1-0))
+  (non-orig (privk b) (privk a))
+  (uniq-orig n1 n1-0)
+  (comment "Double initiator point-of-view"))
 
 ;;; The responder point-of-view
 (defskeleton ns
@@ -102,3 +111,27 @@
   (non-orig (privk a))
   (uniq-orig n1)
   (precedes ((1 1) (0 1))))
+
+(defprotocol nsl-typeless basic
+  (defrole init
+    (vars (a b name) (n1 text) (n2 mesg))
+    (trace
+     (send (enc a n1 (pubk b)))
+     (recv (enc n1 n2 b (pubk a)))
+     (send (enc n2 (pubk b)))))
+  (defrole resp
+    (vars (b a name) (n2 text) (n1 mesg))
+    (trace
+     (recv (enc a n1 (pubk b)))
+     (send (enc n1 n2 b (pubk a)))
+     (recv (enc n2 (pubk b)))))
+  (comment "Needham-Schroeder-Lowe with untyped nonces"))
+
+;;; The responder point-of-view
+(defskeleton nsl-typeless
+  (vars (a b name) (n2 text))
+  (defstrand resp 2 (a a) (n2 n2) (b b))
+  (deflistener n2)
+  (non-orig (privk a) (privk b))
+  (uniq-orig n2)
+  (comment "Shows typeflaw in typeless NSL"))

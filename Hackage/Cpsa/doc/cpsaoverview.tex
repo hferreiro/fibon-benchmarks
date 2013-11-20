@@ -1,5 +1,6 @@
 \documentclass[12pt]{article}
 \usepackage{alltt}
+\usepackage{url}
 
 \newcommand{\cpsacopying}{\begingroup
   \renewcommand{\thefootnote}{}\footnotetext{{\copyright} 2009 The
@@ -23,7 +24,8 @@
 \cpsacopying
 
 Enclosed is a brief overview of CPSA, along with a description of
-CPSA's support for the rely-guarantee method.  The message terms
+CPSA's support for the rely-guarantee
+method~\cite{GuttmanEtAl04,RamsdellEtAl09}.  The message terms
 \nterm{term} used by CPSA are a straightforward representation of
 terms using Lisp-style, prefix notation.
 
@@ -38,11 +40,12 @@ of some asymmetric key~\texttt{k}, does not allow the receiver to
 construct~\texttt{k}.
 
 Non-atomic terms are constructed by applications of encryption
-(\texttt{enc}) and pairing (\texttt{cat}), where $n$-ary concatenation
-is parsed right-associatively.  The second argument of an encryption
-is the key. Encryption may also be written in an $n$-ary form where
-the last argument is the key and the arguments preceding it are
-implicitly concatenated.
+(\texttt{enc}), hashing (\texttt{hash}), and pairing (\texttt{cat}),
+where $n$-ary concatenation is parsed right-associatively.  The second
+argument of an encryption is the key. Encryption may also be written
+in an $n$-ary form where the last argument is the key and the
+arguments preceding it are implicitly concatenated.  Hashing also may
+written in an $n$-ary form and its arguments are implicitly concatenated.
 
 A term carries one of its subterms if the possession of the right set
 of keys allows the extraction of the subterm.  The carries relation is
@@ -69,6 +72,7 @@ A role has the form:
 (defrole \nterm{sym} (vars \nterms{decl})
 \quad (trace \ntermp{event})
 \quad \ntermo{(non-orig \nterms{non})}
+\quad \ntermo{(pen-non-orig \nterms{non})}
 \quad \ntermo{(uniq-orig \nterms{atom})}
 \quad \nterm{annos})
 
@@ -117,13 +121,14 @@ A strand's behavior includes inherited origination assumptions.  When
 a role assumes atom~$a$ is uniquely originating using the
 \texttt{uniq-orig} form, applying the substitution
 \texttt{(\nterms{maplet})} to $a$ produces an inherited uniquely
-originating atom.  Role atoms assumed to be non-originating using the
-\texttt{non-orig} form are inherited similarly.  For a non-originating
-assumption, a strand height may be associated with an atom.  In this
-case, a non-originating assumption is inherited by strands that meet
-or exceed the height constraint.  Note that the definition of a
-uniquely originating atom and a non-originating atom in an execution
-is still to come.
+originating atom.  A role atom assumed to be non-originating using the
+\texttt{non-orig} or \texttt{pen-non-orig} form is inherited
+similarly.  For a non-originating assumption, a strand height may be
+associated with an atom.  In this case, a non-originating assumption
+is inherited by strands that meet or exceed the height constraint.
+Note that the definition of a uniquely originating atom and a
+non-originating atom in an execution is still to come.  Also, the two
+flavors of non-origination assumptions have yet to be described.
 
 A strand in an execution is identified by a natural number.  To
 describe an execution, the behavior of each participant is listed
@@ -181,6 +186,12 @@ decrypts must receive the key as one of its inputs, keys used by the
 adversary---compromised keys---have always been transmitted by some
 strand. The basic adversary roles are built into CPSA.
 
+A \emph{penetrator non-originating atom} may be carried, and it or its
+inverse must occur in some trace.  The inherited penetrator
+non-origination atoms must satisfy this property too.  A penetrator
+non-originating assumption asserts that the adversary is not allowed
+to originate the atom.
+
 \section{Skeletons}
 
 CPSA never directly represents adversarial behavior.  Instead, a
@@ -193,6 +204,7 @@ make up part of an execution. A skeleton is specified in CPSA output using a
 \quad \ntermp{defstrand}
 \quad \ntermo{(precedes \nterms{pair})}
 \quad \ntermo{(non-orig \nterms{atom})}
+\quad \ntermo{(pen-non-orig \nterms{atom})}
 \quad \ntermo{(uniq-orig \nterms{atom})})
 \end{alltt}
 \end{quote}
@@ -206,15 +218,17 @@ on their message term.  Two nodes are related if the sending event
 precedes the reception reception event, as an execution it represents
 may include events in between.
 
-The final two additional components of a skeleton are a set of
-non-originating atoms, and a set of uniquely originating atoms.  To be
-a skeleton, each uniquely originating atom must originate in at
-most one strand in the skeleton, and each non-originating atom must
-never be carried by some event in the skeleton and every
-variable that occurs in the atom must occur in some event.
-Furthermore, for each uniquely originating atom that originates in the
-skeleton, the node relation must ensure that reception nodes that
-carry the atom follow the node of its origination.
+The final three additional components of a skeleton are a set of
+non-originating atoms, a set of penetrator non-originating atoms, and
+a set of uniquely originating atoms.  To be a skeleton, each uniquely
+originating atom must originate in at most one strand in the skeleton,
+and each non-originating atom must never be carried by some event in
+the skeleton and every variable that occurs in the atom must occur in
+some event, and every variable that occurs in each penetrator
+non-originating atom must occur in some event.  Furthermore, for each
+uniquely originating atom that originates in the skeleton, the node
+relation must ensure that reception nodes that carry the atom follow
+the node of its origination.
 
 One special skeleton is associated with each execution.  It summarizes
 the regular behavior of the execution.  It is derived from the
@@ -322,5 +336,8 @@ On output, each shape contains an \texttt{annotations} form and an
 non-trivial formula derived from the protocol. The obligations form
 presents every non-trivial formula that must be true if the shape is
 sound.
+
+\bibliography{cpsa}
+\bibliographystyle{plain}
 
 \end{document}

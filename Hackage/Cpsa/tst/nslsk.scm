@@ -1,4 +1,4 @@
-;;; Needham-Schroeder-Lowe Protocol augmented with symmetric encryption
+(herald "Needham-Schroeder-Lowe Protocol with symmetric encryption")
 
 (defprotocol nslsk basic
   (defrole init (vars (a b name) (n text) (k skey) (t text))

@@ -10,7 +10,6 @@ module Main (main) where
 
 import Numeric
 import System.IO
-import System.IO.Error
 import System.Console.GetOpt
 import CPSA.Lib.CPSA (PosHandle, SExpr, Pos)
 import CPSA.Lib.Entry
@@ -25,108 +24,174 @@ import CPSA.Graph.LaTeXView
 data Params = Params
     { file :: Maybe FilePath,   -- Nothing specifies standard output
       format :: Format,         -- Output format
+      prefix :: Bool,           -- Use prefix notation?
+      scripted :: Bool,         -- Use scripting?
       margin :: Int }           -- Output line length
     deriving Show
 
-data Format = XML | SVG | LaTeX deriving Show
+data Format = XHTML | TreelessXHTML | SVG | LaTeX deriving Show
 
 main :: IO ()
 main =
     do
       (p, params) <- start options interp
-      sexprs <- readSExprs p
-      preskels <- try (loadDefs sexprs)
+      case format params of
+        TreelessXHTML -> treeless p params
+        LaTeX -> latex p params
+        _ -> loadAll p params
+
+-- Load all preskeletons before generating any output.
+-- Don't use these graphing methods if your input is large.
+loadAll :: PosHandle -> Params -> IO ()
+loadAll p params =
+    do
+      preskels <- tryIO (loadDefs p)
       case preskels of
-        Left err -> abort (ioeGetErrorString err)
-        Right (_, []) ->
-            abort "Empty input"
+        Left err -> abort (show err)
         Right (cmts, preskels) ->
             do
               h <- outputHandle (file params)
+              hPutStrLn h "<?xml version=\"1.0\"?>"
+              hPutStrLn h ("<!-- " ++ cpsaVersion ++ " -->")
+              let conf = config (prefix params) (scripted params)
               case format params of
-                LaTeX ->
-                    do
-                      hPutStrLn h "\\documentclass[12pt]{article}"
-                      hPutStrLn h ("% " ++ cpsaVersion)
-                      latexView h (margin params) cmts preskels
-                _ ->
-                    do
-                      hPutStrLn h "<?xml version=\"1.0\"?>"
-                      hPutStrLn h ("<!-- " ++ cpsaVersion ++ " -->")
-                      case format params of
-                        XML -> expandedView h (config False)
-                               (margin params) cmts preskels
-                        SVG -> compactView h (config True) preskels
-                        LaTeX -> error "Bad case in main"
+                XHTML -> expandedView h (conf False)
+                         (margin params) cmts preskels
+                SVG -> compactView h (conf True) preskels
+                _ -> error "Bad case in main"
 
-readSExprs :: PosHandle -> IO [SExpr Pos]
-readSExprs p =
-    loop []
+-- Load comments and preskeletons
+loadDefs :: PosHandle -> IO ([SExpr Pos], [Preskel])
+loadDefs h =
+    do
+      (cmts, k, s) <- loadFirst h
+      ks <- loop [k] s
+      return (cmts, ks)
     where
-      loop xs =
+      loop ks s =
           do
-            x <- readSExpr p
-            case x of
-              Nothing ->
-                  return $ reverse xs
-              Just x ->
-                  loop (x:xs)
+            n <- loadNext s
+            case n of
+              Nothing ->        -- EOF
+                  return $ reverse ks
+              Just (k, s) ->
+                  loop (k:ks) s
+
+-- XHTML graphing for very large files.
+-- Treeless loads one S-expression at a time, processes it, prints the
+-- results, and makes the S-expression available for garbage
+-- collection before reading the next S-expression.
+treeless :: PosHandle -> Params -> IO ()
+treeless p params =
+    do
+      preskel <- tryIO (loadFirst p)
+      case preskel of
+        Left err -> abort (show err)
+        Right (cmts, preskel, state) ->
+            do
+              h <- outputHandle (file params)
+              hPutStrLn h "<?xml version=\"1.0\"?>"
+              hPutStrLn h ("<!-- " ++ cpsaVersion ++ " -->")
+              let conf = config (prefix params) (scripted params) False
+              ans <- tryIO (treelessView h conf (margin params)
+                                         cmts preskel state)
+              case ans of
+                Left err -> abort (show err)
+                Right () -> return ()
+
+-- LaTeX graphing.
+latex :: PosHandle -> Params -> IO ()
+latex p params =
+    do
+      preskel <- tryIO (loadFirst p)
+      case preskel of
+        Left err -> abort (show err)
+        Right (cmts, preskel, state) ->
+            do
+              h <- outputHandle (file params)
+              hPutStrLn h "\\documentclass[12pt]{article}"
+              hPutStrLn h ("% " ++ cpsaVersion)
+              let conf = config (prefix params) (scripted params) False
+              let pp = printer conf
+              ans <- tryIO (latexView h (margin params) pp cmts preskel state)
+              case ans of
+                Left err -> abort (show err)
+                Right () -> return ()
 
 -- Command line option flags
 data Flag
     = Help                      -- Help
     | Info                      -- Version information
-    | Expanded                  -- Select expanded format in XML
+    | Expanded                  -- Select expanded format in XHTML
+    | Treeless                  -- Select treeless expanded format in XHTML
+    | Scripted                  -- Ensable scripting
     | Compact                   -- Select compact format in SVG
     | Text                      -- Select text format in LaTeX
     | Margin String             -- Output line length
+    | InfixFlag                 -- Select output notation
     | Output String             -- Output file name
       deriving Show
+
+defaultMargin :: Int
+defaultMargin = optMargin defaultOptions
 
 options :: [OptDescr Flag]
 options =
     [ Option ['o'] ["output"]   (ReqArg Output "FILE") "output FILE",
       Option ['x'] ["expanded"] (NoArg Expanded)
       "use expanded format (default)",
+      Option ['z'] ["zoom"]     (NoArg Scripted)
+      "enable diagram scaling",
+      Option ['t'] ["treeless"] (NoArg Treeless)
+      "use treeless expanded format",
       Option ['c'] ["compact"]  (NoArg Compact)        "use compact format",
       Option ['l'] ["latex"]    (NoArg Text)           "use LaTeX format",
       Option ['m'] ["margin"]   (ReqArg Margin "INT")
       ("set output margin (default " ++ show defaultMargin ++ ")"),
+      Option ['i'] ["infix"]    (NoArg InfixFlag) "output uses infix notation",
       Option ['h'] ["help"]     (NoArg Help)           "show help message",
       Option ['v'] ["version"]  (NoArg Info)           "show version number" ]
 
 -- Interpret option flags
 interp :: [Flag] -> IO Params
 interp flags =
-    loop flags Nothing XML defaultMargin -- By default, no output file
-    where                                -- and use expanded format
-      loop [] file format margin =
-          return Params { file = file,
-                          format = format,
-                          margin = margin }
-      loop (Output name : flags) Nothing format margin =
-          loop flags (Just name) format margin
-      loop (Expanded : flags) file _ margin =
-          loop flags file XML margin
-      loop (Compact : flags) file _ margin =
-          loop flags file SVG margin
-      loop (Text : flags) file _ margin =
-          loop flags file LaTeX margin
-      loop (Margin value : flags) file format _ =
+    loop flags (Params { file = Nothing, -- By default, no output file
+                         format = XHTML, -- and use expanded format
+                         prefix = True,
+                         scripted = False,
+                         margin = defaultMargin })
+    where
+      loop [] params = return params
+      loop (Output name : flags) params
+          | file params == Nothing =
+              loop flags $ params { file = Just name }
+      loop (Expanded : flags) params =
+          loop flags $ params { format = XHTML }
+      loop (Treeless : flags) params =
+          loop flags $ params { format = TreelessXHTML }
+      loop (Scripted : flags) params =
+          loop flags $ params { scripted = True }
+      loop (Compact : flags) params =
+          loop flags $ params { format = SVG }
+      loop (Text : flags) params =
+          loop flags $ params { format = LaTeX }
+      loop (InfixFlag : flags) params =
+          loop flags $ params { prefix = False }
+      loop (Margin value : flags) params =
           case readDec value of
             [(margin, "")] ->
-                loop flags file format margin
+                loop flags $ params { margin = margin }
             _ ->
                 do
                   msg <- usage options ["Bad value for margin\n"]
                   abort msg
-      loop (Info : _) _ _ _ =
+      loop (Info : _) _ =
           success cpsaVersion
-      loop (Help : _) _ _ _ =
+      loop (Help : _) _ =
           do                    -- Show help then exit with success
             msg <- usage options []
             success msg
-      loop _ _ _ _ =
+      loop _ _ =
            do                   -- Show help then exit with failure
              msg <- usage options ["Bad option combination\n"]
              abort msg
@@ -134,8 +199,8 @@ interp flags =
 -- Default configuration.  The lengths are in points, however the more
 -- natural choice is a font relative unit of length such as ems,
 -- however FireFox doesn't support these units yet.
-config :: Bool -> Config
-config compact =
+config :: Bool -> Bool -> Bool -> Config
+config prefix scripts compact =
     Config { units = "pt",
              font = font,
              stroke = 0.08 * font,
@@ -150,6 +215,8 @@ config compact =
              mx = 3.33 * font,
              my = 3.33 * font,
              br = 0.50 * font,
-             compact = compact}
+             compact = compact,
+             notation = if prefix then Prefix else Infix,
+             scripts = scripts }
     where
       font = 12

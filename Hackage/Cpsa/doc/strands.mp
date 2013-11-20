@@ -13,9 +13,23 @@ def drawmsg(expr p) =
   drawarrow p;
 enddef;
 
-% Draw a strand succession edge
+% Draw a strand succession edge.  The arrow head is drawn, not filled.
+% Based on "Hints and Tricks" in TUGboat, Volume 19 (1998), No. 2, by
+% Jeremy Gibbons.
 def drawsucc(expr p) =
-  drawarrow p;
+  draw arrowhead p;
+  path q;
+  q := fullcircle scaled (2*ahlength)
+    shifted (point (length p) of p);
+  numeric tp, tq;
+  (tp,tq) = p intersectiontimes q;
+  draw subpath (0, tp) of p;
+enddef;
+
+% Draw a message edge with a dashed line.  Used sometimes for when the
+% source and the distination message differ.
+def drawdashedmsg(expr p) =
+  drawarrow p dashed evenly scaled 3;
 enddef;
 
 % Strand drawing macros
@@ -70,22 +84,46 @@ vardef strand@#(expr height, origin, delta, name, node) =
   linkstrand@#(height);
 enddef;
 
-% Directed term macros
+% layout a strand but don't draw it.
+vardef phantomstrand@#(expr height, origin, delta, name, node) =
+  boxstrand@#(height, origin, name, node);
+  layoutstrand@#(height, delta);
+  for i = height downto 1:
+    fixsize(@#[i]);
+  endfor;
+enddef;
 
-% Draw an inbound directed term at a given strand position.  The width
-% is the length of the first arrow.
+% Event macros used while displaying roles.
+
+% Draw an inbound term at a given strand position.
+% The width is the length of the first arrow.
 vardef inbnd@#(expr pos, width, term) =
   pair d;
-  d = (width + xpart @#[1].e, ypart @#[pos].e);
+  d = (xpart @#[1].e + width, ypart @#[pos].e);
   drawmsg(d .. @#[pos].e);
   label.rt(term, d);
 enddef;
 
-% Draw an outbound directed term at a given strand position.  The
-% width is the length of the first arrow.
+% Draw an outbound term at a given strand position.
+% The width is the length of the first arrow.
 vardef outbnd@#(expr pos, width, term) =
   pair d;
-  d = (width + xpart @#[1].e, ypart @#[pos].e);
+  d = (xpart @#[1].e + width, ypart @#[pos].e);
   drawmsg(@#[pos].e .. d);
   label.rt(term, d);
+enddef;
+
+% Reverse versions:
+vardef rinbnd@#(expr pos, width, term) =
+  pair d;
+  d = (xpart @#[1].w - width, ypart @#[pos].w);
+  drawmsg(d .. @#[pos].w);
+  label.lft(term, d);
+enddef;
+
+vardef routbnd@#(expr pos, width, term) =
+  pair d;
+  d = (xpart @#[1].w - width, ypart @#[pos].w);
+  drawmsg(@#[pos].w .. d);
+  label.lft(term, d);
 enddef;

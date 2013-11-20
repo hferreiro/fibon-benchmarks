@@ -1,4 +1,5 @@
--- Generic list functions and cycle checking
+-- Contains generic list functions and a function that determines if a
+-- graph has a cycle.
 
 -- Copyright (c) 2009 The MITRE Corporation
 --
@@ -45,6 +46,13 @@ assert :: Monad m => (a -> Bool) -> a -> m a
 assert pred x
     | pred x = return x
     | otherwise = fail "assertion failed"
+
+seqList :: [a] -> [a]
+seqList xs =
+    loop xs
+    where
+      loop [] = xs
+      loop (y : ys) = seq y (loop ys)
 
 -- Is graph acyclic?
 isAcyclic :: Ord a => (a -> [a]) -> [a] -> Bool

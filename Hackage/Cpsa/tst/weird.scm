@@ -1,4 +1,4 @@
-(defprotocol wierd basic
+(defprotocol weird basic
   (defrole originator
     (vars (k skey))
     (trace (send k))
@@ -11,14 +11,14 @@
     (trace (recv (enc a k)))))
 
 ;;; CPSA mistakenly concludes this is a skeleton.
-(defskeleton wierd
+(defskeleton weird
   (vars (k skey))
   (defstrand originator 1 (k k))
   (defstrand guesser 1 (k k)))
 
 ;;; CPSA mistakenly concludes it is possible for the encryptor to
 ;;; acquire k.
-(defskeleton wierd
+(defskeleton weird
   (vars (k skey))
   (defstrand originator 1 (k k))
   (defstrand encryptor 1 (k k)))

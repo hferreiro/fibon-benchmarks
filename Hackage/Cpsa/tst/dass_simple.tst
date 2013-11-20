@@ -1,7 +1,9 @@
-(comment "CPSA 2.1.0")
-(comment "All input read")
+(herald "Distributed Authentication Security Service Protocol Variants")
 
-(defprotocol dass basic
+(comment "CPSA 2.3.1")
+(comment "All input read from dass_simple.scm")
+
+(defprotocol dass-simple basic
   (defrole init
     (vars (a b name) (k skey) (ta text) (kp akey) (tb text))
     (trace
@@ -18,7 +20,7 @@
   (comment "b might interact with a compromised initiator.")
   (comment "That is why a is not authenticated to b."))
 
-(defskeleton dass
+(defskeleton dass-simple
   (vars (ta tb text) (a b name) (k skey) (kp akey))
   (defstrand init 2 (ta ta) (tb tb) (a a) (b b) (k k) (kp kp))
   (non-orig (invk kp) (privk a) (privk b))
@@ -29,9 +31,10 @@
          (enc (enc k (pubk b)) (invk kp)))) (recv (enc "resp" tb k))))
   (label 0)
   (unrealized (0 1))
+  (origs (k (0 0)) (kp (0 0)))
   (comment "2 in cohort - 2 not yet seen"))
 
-(defskeleton dass
+(defskeleton dass-simple
   (vars (ta tb ta-0 text) (a b a-0 b-0 name) (k skey) (kp kp-0 akey))
   (defstrand init 2 (ta ta) (tb tb) (a a) (b b) (k k) (kp kp))
   (defstrand resp 2 (ta ta-0) (tb tb) (a a-0) (b b-0) (k k) (kp kp-0))
@@ -53,7 +56,7 @@
   (unrealized (1 0))
   (comment "2 in cohort - 2 not yet seen"))
 
-(defskeleton dass
+(defskeleton dass-simple
   (vars (ta tb text) (a b name) (k skey) (kp akey))
   (defstrand init 2 (ta ta) (tb tb) (a a) (b b) (k k) (kp kp))
   (deflistener k)
@@ -71,14 +74,14 @@
   (unrealized (1 0))
   (comment "empty cohort"))
 
-(defskeleton dass
+(defskeleton dass-simple
   (vars (ta tb text) (a b a-0 b-0 name) (k skey) (kp kp-0 akey))
   (defstrand init 2 (ta ta) (tb tb) (a a) (b b) (k k) (kp kp))
   (defstrand resp 2 (ta ta) (tb tb) (a a-0) (b b-0) (k k) (kp kp-0))
   (precedes ((0 0) (1 0)) ((1 1) (0 1)))
   (non-orig (invk kp) (privk a) (privk b))
   (uniq-orig k kp)
-  (operation encryption-test (added-strand init 1) (enc "init" ta k)
+  (operation encryption-test (displaced 2 0 init 1) (enc "init" ta-0 k)
     (1 0))
   (traces
     ((send
@@ -93,7 +96,7 @@
   (unrealized (1 0))
   (comment "1 in cohort - 1 not yet seen"))
 
-(defskeleton dass
+(defskeleton dass-simple
   (vars (ta tb ta-0 text) (a b a-0 b-0 name) (k skey) (kp kp-0 akey))
   (defstrand init 2 (ta ta) (tb tb) (a a) (b b) (k k) (kp kp))
   (defstrand resp 2 (ta ta-0) (tb tb) (a a-0) (b b-0) (k k) (kp kp-0))
@@ -116,7 +119,7 @@
   (unrealized (2 0))
   (comment "empty cohort"))
 
-(defskeleton dass
+(defskeleton dass-simple
   (vars (ta tb text) (a b a-0 name) (k skey) (kp kp-0 akey))
   (defstrand init 2 (ta ta) (tb tb) (a a) (b b) (k k) (kp kp))
   (defstrand resp 2 (ta ta) (tb tb) (a a-0) (b b) (k k) (kp kp-0))
@@ -134,7 +137,9 @@
   (label 5)
   (parent 3)
   (unrealized)
-  (shape))
+  (shape)
+  (maps ((0) ((a a) (b b) (k k) (kp kp) (ta ta) (tb tb))))
+  (origs (k (0 0)) (kp (0 0))))
 
 (comment "Nothing left to do")
 
@@ -167,6 +172,7 @@
          (enc (enc k (pubk b)) (invk kp)))) (recv (enc "resp" tb k))))
   (label 6)
   (unrealized (0 1))
+  (origs (k (0 0)) (kp (0 0)))
   (comment "2 in cohort - 2 not yet seen"))
 
 (defskeleton dass+
@@ -216,7 +222,7 @@
   (precedes ((0 0) (1 0)) ((1 1) (0 1)))
   (non-orig (invk kp) (privk a) (privk b) (privk a-0))
   (uniq-orig k kp)
-  (operation encryption-test (added-strand init 1) (enc "init" ta k)
+  (operation encryption-test (displaced 2 0 init 1) (enc "init" ta-0 k)
     (1 0))
   (traces
     ((send
@@ -229,7 +235,7 @@
   (label 9)
   (parent 7)
   (unrealized (1 0))
-  (comment "1 in cohort - 1 not yet seen"))
+  (comment "2 in cohort - 2 not yet seen"))
 
 (defskeleton dass+
   (vars (ta tb ta-0 text) (a b a-0 b-0 name) (k skey) (kp kp-0 akey))
@@ -255,6 +261,27 @@
   (comment "empty cohort"))
 
 (defskeleton dass+
+  (vars (ta tb text) (a b b-0 name) (k skey) (kp akey))
+  (defstrand init 2 (ta ta) (tb tb) (a a) (b b) (k k) (kp kp))
+  (defstrand resp 2 (ta ta) (tb tb) (a a) (b b-0) (k k) (kp kp))
+  (precedes ((0 0) (1 0)) ((1 1) (0 1)))
+  (non-orig (invk kp) (privk a) (privk b))
+  (uniq-orig k kp)
+  (operation encryption-test (displaced 2 0 init 1)
+    (enc a-0 kp-0 (privk a-0)) (1 0))
+  (traces
+    ((send
+       (cat (enc "init" ta k) (enc a kp (privk a))
+         (enc (enc k (pubk b)) (invk kp)))) (recv (enc "resp" tb k)))
+    ((recv
+       (cat (enc "init" ta k) (enc a kp (privk a))
+         (enc (enc k (pubk b-0)) (invk kp)))) (send (enc "resp" tb k))))
+  (label 11)
+  (parent 9)
+  (unrealized (1 0))
+  (comment "1 in cohort - 1 not yet seen"))
+
+(defskeleton dass+
   (vars (ta tb ta-0 text) (a b a-0 b-0 b-1 name) (k k-0 skey)
     (kp kp-0 akey))
   (defstrand init 2 (ta ta) (tb tb) (a a) (b b) (k k) (kp kp))
@@ -276,10 +303,33 @@
     ((send
        (cat (enc "init" ta-0 k-0) (enc a-0 kp-0 (privk a-0))
          (enc (enc k-0 (pubk b-1)) (invk kp-0))))))
-  (label 11)
+  (label 12)
   (parent 9)
   (unrealized (1 0))
   (comment "1 in cohort - 1 not yet seen"))
+
+(defskeleton dass+
+  (vars (ta tb text) (a b name) (k skey) (kp akey))
+  (defstrand init 2 (ta ta) (tb tb) (a a) (b b) (k k) (kp kp))
+  (defstrand resp 2 (ta ta) (tb tb) (a a) (b b) (k k) (kp kp))
+  (precedes ((0 0) (1 0)) ((1 1) (0 1)))
+  (non-orig (invk kp) (privk a) (privk b))
+  (uniq-orig k kp)
+  (operation encryption-test (displaced 2 0 init 1)
+    (enc (enc k (pubk b-0)) (invk kp)) (1 0))
+  (traces
+    ((send
+       (cat (enc "init" ta k) (enc a kp (privk a))
+         (enc (enc k (pubk b)) (invk kp)))) (recv (enc "resp" tb k)))
+    ((recv
+       (cat (enc "init" ta k) (enc a kp (privk a))
+         (enc (enc k (pubk b)) (invk kp)))) (send (enc "resp" tb k))))
+  (label 13)
+  (parent 11)
+  (unrealized)
+  (shape)
+  (maps ((0) ((a a) (b b) (k k) (kp kp) (ta ta) (tb tb))))
+  (origs (k (0 0)) (kp (0 0))))
 
 (defskeleton dass+
   (vars (ta tb ta-0 text) (a b a-0 b-0 name) (k k-0 skey)
@@ -301,30 +351,11 @@
     ((send
        (cat (enc "init" ta-0 k-0) (enc a-0 kp-0 (privk a-0))
          (enc (enc k-0 (pubk b-0)) (invk kp-0))))))
-  (label 12)
-  (parent 11)
-  (unrealized)
-  (shape)
-  (comment "1 in cohort - 1 not yet seen"))
-
-(defskeleton dass+
-  (vars (ta tb text) (a b name) (k skey) (kp akey))
-  (defstrand init 2 (ta ta) (tb tb) (a a) (b b) (k k) (kp kp))
-  (defstrand resp 2 (ta ta) (tb tb) (a a) (b b) (k k) (kp kp))
-  (precedes ((0 0) (1 0)) ((1 1) (0 1)))
-  (non-orig (invk kp) (privk a) (privk b))
-  (uniq-orig k kp)
-  (operation collapsed 2 0)
-  (traces
-    ((send
-       (cat (enc "init" ta k) (enc a kp (privk a))
-         (enc (enc k (pubk b)) (invk kp)))) (recv (enc "resp" tb k)))
-    ((recv
-       (cat (enc "init" ta k) (enc a kp (privk a))
-         (enc (enc k (pubk b)) (invk kp)))) (send (enc "resp" tb k))))
-  (label 13)
+  (label 14)
   (parent 12)
   (unrealized)
-  (shape))
+  (shape)
+  (maps ((0) ((a a) (b b) (k k) (kp kp) (ta ta) (tb tb))))
+  (origs (k (0 0)) (kp (0 0))))
 
 (comment "Nothing left to do")

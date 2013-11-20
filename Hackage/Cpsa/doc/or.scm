@@ -1,6 +1,5 @@
-;;; Otway-Rees Protocol
-
-;;; Standard version using variables of sort mesg
+(herald "Otway-Rees Protocol"
+	(comment "Standard version using variables of sort mesg"))
 
 (defprotocol or basic
   (defrole init (vars (a b s name) (na text) (k skey) (m text))

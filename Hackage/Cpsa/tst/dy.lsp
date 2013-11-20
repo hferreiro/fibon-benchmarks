@@ -1,4 +1,4 @@
-;; Example 1.3 in the 1983 Dolev-Yao paper.
+(herald "Example 1.3 from 1983 Dolev-Yao Paper")
 
 ; This protocol, from Example 1.3 in 1983 Dolev-Yao paper, is known to
 ; be vulnerable to the following attack.

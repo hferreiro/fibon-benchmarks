@@ -12,16 +12,19 @@
 module Main (main) where
 
 import System.IO
-import System.IO.Error
 import CPSA.Lib.CPSA
 import CPSA.Lib.Entry
 import CPSA.Parameters.Flow
 import qualified CPSA.Basic.Algebra
 import qualified CPSA.DiffieHellman.Algebra
+import qualified CPSA.DiffieHellmanNoReciprocal.Algebra
+import qualified CPSA.SimpleDiffieHellman.Algebra
 
 -- Algebra names
 algs :: [String]
-algs = [CPSA.Basic.Algebra.name, CPSA.DiffieHellman.Algebra.name]
+algs = [CPSA.Basic.Algebra.name, CPSA.DiffieHellman.Algebra.name,
+        CPSA.DiffieHellmanNoReciprocal.Algebra.name,
+        CPSA.SimpleDiffieHellman.Algebra.name]
 
 main :: IO ()
 main =
@@ -37,6 +40,11 @@ main =
               go (step h alg CPSA.Basic.Algebra.origin margin) p
           | alg == CPSA.DiffieHellman.Algebra.name ->
               go (step h alg CPSA.DiffieHellman.Algebra.origin margin) p
+          | alg == CPSA.DiffieHellmanNoReciprocal.Algebra.name ->
+              go (step h alg
+                       CPSA.DiffieHellmanNoReciprocal.Algebra.origin margin) p
+          | alg == CPSA.SimpleDiffieHellman.Algebra.name ->
+              go (step h alg CPSA.SimpleDiffieHellman.Algebra.origin margin) p
           | otherwise ->
                abort ("Bad algebra: " ++ alg)
       hClose h
@@ -60,9 +68,9 @@ step :: Algebra t p g s e c => Handle ->
         String -> g -> Int -> SExpr Pos -> IO ()
 step output name origin margin sexpr =
     do
-      sexpr <- try (dataFlow name origin sexpr)
+      sexpr <- tryIO (dataFlow name origin sexpr)
       case sexpr of
         Right sexpr ->
             writeLnSEexpr output margin sexpr
         Left err ->
-            abort (ioeGetErrorString err)
+            abort (show err)

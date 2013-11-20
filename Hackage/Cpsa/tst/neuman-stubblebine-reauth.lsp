@@ -1,4 +1,4 @@
-(defprotocol neuman-stubblebine basic
+(defprotocol neuman-stubblebine-reauth basic
   (defrole init (vars (a b ks name) (ra rb text) (k skey) (tb text))
     (trace
      (send (cat a ra))
@@ -28,7 +28,7 @@
 		(enc a k tb (ltk b ks)) rb)))
     (uniq-orig k)))
 
-(defskeleton neuman-stubblebine
+(defskeleton neuman-stubblebine-reauth
   (vars (ra rb-0 tb rb text) (a b ks name) (k skey)
 	(ra-prime rb-prime text))
   (defstrand resp 3 (a a) (b b) (ks ks) (ra ra) (rb rb) (k k) (tb tb))

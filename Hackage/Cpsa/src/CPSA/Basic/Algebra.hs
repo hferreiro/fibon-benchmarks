@@ -64,6 +64,7 @@ cloneId gen x = freshId gen (idName x)
 -- Operations:
 --   cat : mesg X mesg -> mesg               Pairing
 --   enc : mesg X mesg -> mesg               Encryption
+--   hash : mesg X mesg -> mesg              Hashing
 --   string : mesg                           Tag constants
 --   ltk : name X name -> skey               Long term shared key
 --   pubk : name -> akey                     Public key of principal
@@ -82,6 +83,7 @@ cloneId gen x = freshId gen (idName x)
 -- Operations:
 --   cat : mesg X mesg -> mesg               Pairing
 --   enc : mesg X mesg -> mesg               Encryption
+--   hash : mesg -> mesg                     Hashing
 --   string : mesg                           Tag constants
 --   ltk : name X name -> skey               Long term shared key
 --   pubk : name -> akey                     Public key of principal
@@ -107,6 +109,7 @@ data Symbol
     | Pubk                      -- Public asymmetric key of a principal
     | Cat                       -- Term concatenation (Pairing really)
     | Enc                       -- Encryption
+    | Hash                      -- Hashing
       deriving (Show, Eq, Ord, Enum, Bounded)
 
 -- A Basic Crypto Algebra Term
@@ -143,6 +146,10 @@ varId (F Skey [I x]) = x
 varId (F Akey [I x]) = x
 varId _ = error "Algebra.varId: term not a variable with its sort"
 
+isMesgVar :: Term -> Bool
+isMesgVar (I _) = True
+isMesgVar _ = False
+
 -- A list of terms are well-formed if each one has the correct
 -- structure and every occurrence of an identifier in a term has the
 -- same sort.  Variable environments are used to check the sort
@@ -175,7 +182,7 @@ emptyVarEnv = VarEnv M.empty
 -- The non-terminal symbols are B, K, and T.  Symbol B is for base
 -- sorted terms, and K is for asymmetric keys.
 --
---     T ::= I | C | B | cat(T, T) | enc(T, T)
+--     T ::= I | C | B | cat(T, T) | enc(T, T) | hash(T)
 --
 --     B ::= text(I) | data(I) | name(I) | skey(I)
 --        |  skey(I) | skey(ltk(I, I)) | akey(K)
@@ -212,6 +219,8 @@ termWellFormed xts (F Cat [t0, t1]) =
     doubleTermWellFormed xts t0 t1  -- Concatenation
 termWellFormed xts (F Enc [t0, t1]) =
     doubleTermWellFormed xts t0 t1  -- Encryption
+termWellFormed xts (F Hash [t])     =
+    termWellFormed xts t            -- Hashing
 termWellFormed _ _ = Nothing
 
 -- Extend when sorts agree
@@ -262,6 +271,8 @@ foldVars f acc (F Cat [t0, t1]) = -- Concatenation
     foldVars f (foldVars f acc t0) t1
 foldVars f acc (F Enc [t0, t1]) = -- Encryption
     foldVars f (foldVars f acc t0) t1
+foldVars f acc (F Hash [t])     = -- Hashing
+    foldVars f acc t
 foldVars _ _ t = error $ "Algebra.foldVars: Bad term " ++ show t
 
 -- Fold f through a term applying it to each term that is carried by the term.
@@ -296,6 +307,8 @@ buildable knowns unguessable term =
           ba t0 && ba t1
       ba t@(F Enc [t0, t1]) =
           S.member t knowns || ba t0 && ba t1
+      ba t@(F Hash [t1]) =
+          S.member t knowns || ba t1
       ba t = isAtom t && not (S.member t unguessable)
 
 -- Compute the decomposition given some known terms and some unguessable
@@ -315,6 +328,8 @@ decompose knowns unguessable =
           | buildable knowns unguessable (inv t1) = -- Add plaintext
               loop unguessable (decat t0 knowns) old todo
           | otherwise = loop unguessable knowns old todo
+      loop unguessable knowns old ((F Hash [_]) : todo) =
+          loop unguessable knowns old todo -- Hash can't be decomposed
       loop unguessable knowns old (t : todo) =
           loop (S.delete t unguessable) (S.delete t knowns) old todo
       -- Decat
@@ -329,15 +344,18 @@ inv (I _) = error "Algebra.inv: Cannot invert a variable of sort mesg"
 inv t = t
 
 -- Extracts every encryption that is carried by a term along with its
--- encryption key.
-encryptions :: Term -> [(Term, Term)]
+-- encryption key.  Note that a hash is treated as a kind of
+-- encryption in which the term that is hashed is the encryption key.
+encryptions :: Term -> [(Term, [Term])]
 encryptions t =
     reverse $ loop t []
     where
       loop (F Cat [t, t']) acc =
           loop t' (loop t acc)
       loop t@(F Enc [t', t'']) acc =
-          loop t' (adjoin (t, t'') acc)
+          loop t' (adjoin (t, [t'']) acc)
+      loop t@(F Hash [t']) acc =
+          adjoin (t, [t']) acc
       loop _ acc = acc
       adjoin x xs
           | x `elem` xs = xs
@@ -388,6 +406,8 @@ outFlow (F Cat [t0, t1]) a =    -- Construct non-atoms
     comb (outFlow t1) (outFlow t0) a
 outFlow (F Enc [t0, t1]) a =
     comb (outFlow t1) (outFlow t0) a
+outFlow (F Hash [t]) a =
+    outFlow t a
 outFlow t (initial, available) = -- Don't look inside atoms
     S.singleton (S.insert t initial, S.insert t available)
 
@@ -399,16 +419,19 @@ inFlow (F Cat [t0, t1]) a =     -- Try to receive components
          (comb (inFlow t1) (inFlow t0) a)
          (comb (inFlow t0) (inFlow t1) a)
 inFlow t@(F Enc [t0, t1]) (initial, available) =
-    S.union                     -- Encryption can be built
-         (outFlow t (initial, available)) -- or decrypted
-         (comb (inFlow t0) (outFlow (inv t1)) a)
+    S.union
+         (outFlow t (initial, available)) -- Encryption can be built
+         (comb (inFlow t0) (outFlow (inv t1)) a) -- or decrypted
     where                       -- Derive decryption key first
       a = (initial, S.insert t available)
+inFlow (F Hash [t0]) (initial, available) =
+    outFlow t0 (initial, available)
 inFlow t (initial, available) =
     S.singleton (initial, S.insert t available)
 
 instance C.Term Term where
     isVar = isVar
+    isMesgVar = isMesgVar
     isAtom = isAtom
     termsWellFormed = termsWellFormed
     occursIn = occursIn
@@ -434,19 +457,29 @@ instance C.Term Term where
 
 newtype Place = Place [Int] deriving Show
 
--- Returns the places a term occurs within another term.
+-- Returns the places a variable occurs within another term.
 places :: Term -> Term -> [Place]
 places target source =
     f [] [] source
     where
       f paths path source
-          | target == source = Place (reverse path) : paths
+          | I (varId target) == source = Place (reverse path) : paths
       f paths path (F _ u) =
           g paths path 0 u
       f paths _ _ = paths
       g paths _ _ [] = paths
       g paths path i (t : u) =
           g (f paths (i: path) t) path (i + 1) u
+
+-- Replace a variable within a term at a given place.
+replace :: Term -> Place -> Term -> Term
+replace target (Place ints) source =
+    loop ints source
+    where
+      loop [] _ = I (varId target)
+      loop (i : path) (F s u) =
+          F s (C.replaceNth (loop path (u !! i)) i u)
+      loop _ _ = error "Algebra.replace: Bad path to variable"
 
 -- Returns the places a term is carried by another term.
 carriedPlaces :: Term -> Term -> [Place]
@@ -456,20 +489,10 @@ carriedPlaces target source =
       f paths path source
           | target == source = Place (reverse path) : paths
       f paths path (F Cat [t, t']) =
-	  f (f paths  (0 : path) t) (1 : path) t'
+          f (f paths  (0 : path) t) (1 : path) t'
       f paths path (F Enc [t, _]) =
-	  f paths (0 : path) t
+          f paths (0 : path) t
       f paths _ _ = paths
-
--- Replace a term within a term at a given place.
-replace :: Term -> Place -> Term -> Term
-replace target (Place ints) source =
-    loop ints source
-    where
-      loop [] _ = target
-      loop (i : path) (F s u) =
-          F s (C.replaceNth (loop path (u !! i)) i u)
-      loop _ _ = error "Algebra.replace: Bad path to term"
 
 -- Return the ancestors of the term at the given place.
 ancestors :: Term -> Place -> [Term]
@@ -658,31 +681,12 @@ substChase subst t =
       F s u ->
           F s (map (substChase subst) u)
 
--- more general than relation
--- s0 `lte` s1 if s1 = compose s2 s0 for some s2
-moreGeneral :: (Gen, Subst) -> (Gen, Subst) -> Bool
-moreGeneral (_, Subst s0) (_, Subst s1) =
-    let dom = S.elems $ foldl idSet (M.keysSet s0) (M.elems s0)
-        env = foldl (flip M.delete) s1 (M.keys s0) in
-    loop dom (Env env)
-    where
-      loop [] _ = True
-      loop (x : xs) env =
-          maybe False (loop xs) (match (get x s0) (get x s1) env)
-      get x env = M.findWithDefault (I x) x env
-
-idSet :: Set Id -> Term -> Set Id
-idSet set (I id) = S.insert id set
-idSet set (C _) = set
-idSet set (F _ u) = foldl idSet set u
-
 instance C.Subst Term Gen Subst where
    emptySubst = emptySubst
    substitute = substitute
    unify t t' (g, s) =
-       maybe Nothing (\s -> Just (g, s)) $ unify t t' s
+       maybe [] (\s -> [(g, s)]) $ unify t t' s
    compose = compose
-   moreGeneral = moreGeneral
 
 -- Matching and instantiation
 
@@ -708,13 +712,10 @@ match (I x) t (Env r) =
       Nothing -> Just $ Env $ M.insert x t r
       Just t' -> if t == t' then Just $ Env r else Nothing
 match (C c) (C c') r = if c == c' then Just r else Nothing
-match (F Invk [I x]) (F Pubk [I y]) r =
-    match (I x) (F Invk [F Pubk [I y]]) r
-match (F Invk [I x]) (F Pubk [C c, I y]) r =
-    match (I x) (F Invk [F Pubk [C c, I y]]) r
 match (F s u) (F s' u') r
     | s == s' = matchLists u u' r
-    | otherwise = Nothing
+match (F Invk [t]) t' r =
+    match t (F Invk [t']) r
 match _ _ _ = Nothing
 
 matchLists :: [Term] -> [Term] -> Env -> Maybe Env
@@ -725,8 +726,8 @@ matchLists _ _ _ = Nothing
 
 -- Does every varible in ts not occur in the domain of e?
 -- Trivial bindings in e are ignored.
-idempotentEnvFor :: Env -> [Term] -> Bool
-idempotentEnvFor (Env r) ts =
+identityEnvFor :: Env -> [Term] -> Bool
+identityEnvFor (Env r) ts =
     all (allId $ flip S.notMember dom) ts
     where
       dom = M.foldrWithKey f S.empty r -- The domain of r
@@ -785,12 +786,13 @@ instance C.Env Term Gen Subst Env where
    emptyEnv = emptyEnv
    instantiate = instantiate
    match t t' (g, e) =
-       maybe Nothing (\e -> Just (g, e)) $ match t t' e
-   idempotentEnvFor (g, e) ts =
-       if idempotentEnvFor e ts then
-           Just (g, e)
+       maybe [] (\e -> [(g, e)]) $ match t t' e
+   identityEnvFor (g, e) ts =
+       if identityEnvFor e ts then
+           [(g, e)]
        else
-           Nothing
+           []
+   specialize = id
    substitution = substitution
    reify = reify
    matchRenaming (_, e) = matchRenaming e
@@ -875,6 +877,7 @@ loadDispatch =
     ,("ltk", loadLtk)
     ,("cat", loadCat)
     ,("enc", loadEnc)
+    ,("hash", loadHash)
     ]
 
 -- Atom constructors: pubk privk invk ltk
@@ -941,6 +944,13 @@ splitLast x xs =
       loop z x [] = (reverse z, x)
       loop z x (y : ys) = loop (x : z) y ys
 
+loadHash :: Monad m => LoadFunction m
+loadHash _ vars (l : ls) =
+   do
+     ts <- mapM (loadTerm vars) (l : ls)
+     return $ F Hash [foldr1 (\a b -> F Cat [a, b]) ts]
+loadHash pos _ _ = fail (shows pos "Malformed hash")
+
 -- Term specific displaying functions
 
 newtype Context = Context [(Id, String)] deriving Show
@@ -1000,6 +1010,8 @@ displayTerm ctx (F Cat [t0, t1]) =
     L () (S () "cat" : displayTerm ctx t0 : displayList ctx t1)
 displayTerm ctx (F Enc [t0, t1]) =
     L () (S () "enc" : displayEnc ctx t0 t1)
+displayTerm ctx (F Hash [t]) =
+    L () (S () "hash" : displayList ctx t)
 displayTerm _ t = error ("Algebra.displayTerm: Bad term " ++ show t)
 
 displayList :: Context -> Term -> [SExpr ()]
@@ -1009,6 +1021,12 @@ displayList ctx t = [displayTerm ctx t]
 displayEnc :: Context -> Term -> Term -> [SExpr ()]
 displayEnc ctx (F Cat [t0, t1]) t = displayTerm ctx t0 : displayEnc ctx t1 t
 displayEnc ctx t0 t1 = [displayTerm ctx t0, displayTerm ctx t1]
+
+displayEnv :: Context -> Context -> Env -> [SExpr ()]
+displayEnv ctx ctx' (Env r) =
+    map (\(x, t) -> L () [displayTerm ctx x, displayTerm ctx' t]) r'
+    where
+      r' = map (\(x, t) -> (I x, inferSort t)) $ M.assocs r
 
 -- displaySubst c s displays a substitution s in context c, where some
 -- variables that occur in s might not be in c.  Enough sort
@@ -1092,6 +1110,7 @@ instance C.Context Term Gen Subst Env Context where
     addToContext = addToContext
     displayVars = displayVars
     displayTerm = displayTerm
+    displayEnv = displayEnv
     displaySubst = displaySubst
 
 instance C.Algebra Term Place Gen Subst Env Context

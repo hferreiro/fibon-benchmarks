@@ -1,4 +1,4 @@
-;;; Woo-Lam Protocol
+(herald "Woo-Lam Protocol")
 
 (defprotocol woolam basic
   (defrole init (vars (a s name) (n text))

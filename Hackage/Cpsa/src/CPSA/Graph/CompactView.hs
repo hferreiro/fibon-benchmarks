@@ -32,7 +32,6 @@ docRoot conf w h es =
       attrs = [("width", showL w ++ units conf),
                ("height", showL h ++ units conf),
                ("xmlns", "http://www.w3.org/2000/svg"),
-               ("xmlns:xlink", "http://www.w3.org/1999/xlink"),
                ("version", "1.1"),
                ("viewBox", viewbox),
                ("font-size", showL (font conf)),
@@ -82,7 +81,7 @@ tdraw :: Config -> Float -> Float -> Tree -> (Float, Float, Element)
 tdraw conf x y t =
     (w, h, ec "svg" attrs (rect conf 0 0 tw th : contents))
     where
-      attrs = [("id", "t" ++ show (label (vertex t))),
+      attrs = [("id", tid (show (label (vertex t)))),
                ("x", showL x), ("y", showL y),
                ("width", showL w), ("height", showL h),
                ("visibility", "hidden")]
@@ -98,3 +97,13 @@ body conf x y (w, h, es) t =
     foldl (body conf x y) (max w w', max h h', e:es) (children t)
     where
       (w', h', e) = kdraw conf x y (vertex t)
+
+-- Draw a preskeleton
+kdraw :: Config -> Float -> Float -> Preskel -> (Float, Float, Element)
+kdraw conf x y k =
+    (w, h, ec "svg" attrs (rect conf 0 0 w h : lines))
+    where
+      attrs = [("id", kid (show (label k))), ("x", showL x),
+               ("y", showL y), ("width", showL w), ("height", showL h)] ++
+              if compact conf then [("visibility", "hidden")] else []
+      (w, h, lines) = skel conf k

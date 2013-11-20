@@ -8,7 +8,12 @@
 
 module CPSA.Graph.Tree (Tree (..), Forest, forest, tree) where
 
-import qualified Data.List as L
+import qualified Data.Map as M
+import Data.Map (Map)
+import Data.List (foldl')
+import qualified Data.Set as S
+import Data.Set (Set)
+import CPSA.Lib.CPSA (seqList)
 import CPSA.Graph.XMLOutput
 import CPSA.Graph.Config
 import CPSA.Graph.SVG
@@ -23,12 +28,12 @@ import CPSA.Graph.Loader
 -- display.
 
 data Tree = Tree
-    { vertex :: Preskel,
-      duplicates :: Forest,     -- Preskeletons already seen
-      children :: Forest,       -- Freshly discovered preskeletons
-      alive :: Bool,            -- Is preskeleton alive?
-      width :: Int,             -- Number of leaf nodes
-      height :: Int }           -- Longest distance to a leaf plus one
+    { vertex :: !Preskel,
+      children :: !Forest,      -- Freshly discovered preskeletons
+      duplicates :: !Forest,    -- Preskeletons already seen
+      alive :: !Bool,           -- Is preskeleton alive?
+      width :: !Int,            -- Number of leaf nodes
+      height :: !Int }          -- Longest distance to a leaf plus one
     deriving Show
 
 instance Eq Tree where
@@ -38,55 +43,68 @@ instance Ord Tree where
     compare t0 t1 = compare (vertex t0) (vertex t1)
 
 makeTree :: Preskel -> [Tree] -> [Tree] -> Tree
-makeTree k dups kids =
-    Tree { vertex = k, duplicates = dups, children = kids,
-           alive = True,        -- The correct value is set later
-           width = x (dups ++ kids), height = y (dups ++ kids) }
+makeTree k kids dups =
+    Tree { vertex = k,
+           children = seqList kids,
+           duplicates = seqList dups,
+           alive = live kids dups,
+           width = x kids dups,
+           height = y kids dups }
     where
-      x [] = 1                  -- Compute the width and height
-      x kids = sum (map width kids)
-      y kids = 1 + foldl max 0 (map height kids)
+      live kids dups =
+          maybe True null (unrealized k) ||
+          null kids && null dups && not (empty k) ||
+          any alive kids || any alive dups
+      x [] [] = 1
+      -- The width of a duplicate is one
+      x kids dups = sum (map width kids) + length dups
+      -- The height of a duplicate is one
+      y kids dups = 1 + foldl max (dupsHeight dups) (map height kids)
+      dupsHeight [] = 0
+      dupsHeight _ = 1
 
 type Forest = [Tree]
 
 -- Assemble preskeletons into a forest and then set the alive flag
 forest :: [Preskel] -> Forest
-forest ks = map setLiveness (assemble ks)
-
--- Assemble preskeletons into a forest
-assemble :: [Preskel] -> Forest
-assemble ks =
-    map loops (spanning ks)
+forest ks =
+    map setLiveness (reverse (foldl' f [] ks))
     where
-      loops t =                 -- Add in the other edges
-          let k = vertex t in   -- in the forest
-          makeTree k (map (duplicate k) (seen k))
-                       (map loops (children t))
-      duplicate k tag =
-          case L.find (\k -> label k == tag) ks of
-            Just k -> makeTree k [] []
-            Nothing ->
-                error ("Tree: Cannot find " ++ show tag ++
-                       " seen in skeleton " ++ show (label k))
+      f ts k
+        | parent k == Nothing = -- Found tree root
+            assemble (childMap ks) k : ts
+        | otherwise = ts        -- Otherwise skip k
 
--- Compute the spanning forest of the preskeletons
-spanning :: [Preskel] -> Forest
-spanning [] = []
-spanning (k:ks) =
-    makeTree k [] kids : rest
+-- A child map maps a label to a preskeleton and a list of its
+-- childnen.  The map is derived by looking at the parent field.  The
+-- code assumes a parent precedes its children in the input list.
+childMap :: [Preskel] -> Map Int (Preskel, [Preskel])
+childMap ks =
+    foldl' child M.empty ks
     where
-      (kids, rest) = partition (label k) (assemble ks)
-      partition _ [] = ([], [])
-      partition tag (t:ts) =
-          let (kids, rest) = partition tag ts in
-          case parent (vertex t) of
-            Just parent' ->
-                if parent' == tag then
-                    (t:kids, rest)
-                else
-                    (kids, t:rest)
-            Nothing ->
-                (kids, t:rest)
+      child cm k =
+          case parent k of
+            Nothing -> cm'
+            Just p ->
+                M.adjust addChild p cm'
+          where
+            cm' = M.insert (label k) (k, []) cm
+            addChild (k', children) =
+                (k', k : children)
+
+-- Assemble preskeletons into a tree
+assemble :: Map Int (Preskel, [Preskel]) -> Preskel -> Tree
+assemble table k =
+    makeTree k (kids k) (dups k)
+    where
+      kids k =
+          case M.lookup (label k) table of
+            Nothing -> []       -- This should never happen
+            Just (_, ks) -> map (assemble table) (reverse ks)
+      dups k =
+          [ makeTree k' [] []   -- Make an empty tree for a duplicate
+            | tag <- seen k,
+              k' <- maybe [] (\(k, _) -> [k]) (M.lookup tag table) ]
 
 -- Set the alive flag in each preskeleton.
 setLiveness :: Tree -> Tree
@@ -96,38 +114,37 @@ setLiveness t = updateLiveness (live t) t
 -- dead if it is known to be unrealized, and all of its children are
 -- unrealized.  Because of duplicates, process of computing the list
 -- must be iterated.
-live :: Tree -> [Preskel]
+live :: Tree -> Set Preskel
 live t =
-    loop []
+    loop (init S.empty t)
     where
       decend ks t =
-          let ks' = foldl decend ks (kids t) in
-          if contain ks' (vertex t) || dead ks' t then
+          let ks' = foldl' decend ks (kids t) in
+          if S.member (vertex t) ks' || dead ks' t then
               ks'
           else
-              vertex t : ks'
+              S.insert (vertex t) ks'
       dead ks t =
-          maybe False (not . null) (unrealized (vertex t))
-          && all (not . contain ks . vertex) (kids t)
+          all (not . (flip S.member ks) . vertex) (kids t)
+      kids t = duplicates t ++ children t
       loop old =
           let new = decend old t in
-          if length new == length old then
+          if S.size new == S.size old then
               old
           else
               loop new
-      kids t = duplicates t ++ children t
+      init ks t =
+          foldl' init (live ks t) (children t)
+          where
+            live ks t
+                 | alive t = S.insert (vertex t) ks
+                 | otherwise = ks
 
-updateLiveness :: [Preskel] -> Tree -> Tree
+updateLiveness :: Set Preskel -> Tree -> Tree
 updateLiveness live t =
-    t { duplicates = map (updateLiveness live) (duplicates t),
-        children = map (updateLiveness live) (children t),
-        alive = contain live (vertex t) }
-
--- Does list contain a given preskeleton?
-contain :: [Preskel] -> Preskel -> Bool
-contain [] _ = False
-contain (k:ks) k' =
-    label k == label k' || contain ks k'
+    t { children = map (updateLiveness live) (children t),
+        duplicates = map (updateLiveness live) (duplicates t),
+        alive = S.member (vertex t) live }
 
 -- Draw tree view of preskeleton relations
 tree :: Config -> Tree -> (Float, Float, [Element])
@@ -195,7 +212,7 @@ button conf x y dup t =
     where
       kind =
           case (alive t, dup) of
-            (True, False) -> AliveTree
+            (True, False) -> if shape (vertex t) then Shape else AliveTree
             (True, True) -> AliveDup
             (False, False) -> DeadTree
             (False, True) -> DeadDup

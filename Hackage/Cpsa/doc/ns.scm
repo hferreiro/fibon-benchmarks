@@ -1,4 +1,6 @@
-;;; Needham-Schroeder Protocol
+(herald "Needham-Schroeder Public-Key Protocol"
+	(comment "This protocol contains a man-in-the-middle"
+		 "attack discovered by Galvin Lowe."))
 
 ;;; Used to generate output for inclusion in the primer.
 ;;; Use margin = 60 (-m 60) to generate the output.

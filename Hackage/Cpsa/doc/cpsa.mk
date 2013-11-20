@@ -11,21 +11,25 @@
 %.txt:		%.lsp
 	-$(CPSATIME) cpsa $(CPSAFLAGS) -o $@ $<
 
-# Analyze protocols for shapes using Diffie-Hellman algebra
-%.txt:		%.sch
-	$(CPSATIME) cpsa -a diffie-hellman $(CPSAFLAGS) -o $@ $<
-
 # Extract shapes
 %_shapes.txt:	%.txt
-	cpsashapes -o $@ $<
+	cpsashapes $(SHAPESFLAGS) -o $@ $<
+
+# Extract shape analysis sentences
+%_logic.text:	%.txt
+	cpsalogic $(LOGICFLAGS) -o $@ $<
 
 # Annotate shapes
 %_annotations.txt:	%_shapes.txt
-	cpsaannotations -o $@ $<
+	cpsaannotations $(ANNOTATIONSFLAGS) -o $@ $<
+
+# Compute protocol parameters
+%_parameters.txt:	%_shapes.txt
+	cpsaparameters $(PARAMETERSFLAGS) -o $@ $<
 
 # Visualize output using the expanded format (default)
-%.xml:		%.txt
-	cpsagraph -o $@ $<
+%.xhtml:	%.txt
+	cpsagraph $(GRAPHFLAGS) -o $@ $<
 
 # Visualize output using the compact format
 %.svg:		%.txt

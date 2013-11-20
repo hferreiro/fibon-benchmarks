@@ -9,16 +9,16 @@
 
 SHELL = /bin/sh
 
-DESIGN = cpsadesign
 PRIMER = cpsaprimer
-SPEC = cpsaspec
-THEORY = cpsatheory
 OVERVIEW = cpsaoverview
+SLIDES = cpsaintroslides
+DESIGN = cpsadesign
+SPEC = cpsaspec
 BIB = cpsa
 
 TEX_SRCS = macros.tex bcasyntax.tex
 
-MP_SRCS	= cpsadiagrams.mp carriers.mp termtree.mp
+MP_SRCS	= cpsadiagrams.mp carriers.mp termtree.mp blanchet.mp mitrelogo.mp
 
 %-0.mps:	%.mp
 	mpost -tex=latex $*
@@ -31,7 +31,8 @@ MP_SRCS	= cpsadiagrams.mp carriers.mp termtree.mp
 %.ind:	%.idx
 	makeindex $*
 
-all:	$(PRIMER).pdf $(OVERVIEW).pdf $(DESIGN).pdf $(SPEC).pdf $(THEORY).pdf
+all:	$(PRIMER).pdf $(OVERVIEW).pdf $(SLIDES).pdf \
+		$(DESIGN).pdf $(SPEC).pdf
 
 $(PRIMER).pdf:	$(MP_SRCS:.mp=-0.mps) $(TEX_SRCS) \
 		 $(PRIMER).tex $(PRIMER).bbl
@@ -39,9 +40,12 @@ $(PRIMER).pdf:	$(MP_SRCS:.mp=-0.mps) $(TEX_SRCS) \
 	if test -f $(PRIMER).idx; then $(MAKE) $(PRIMER).ind; fi
 	pdflatex $(PRIMER).tex
 
-$(OVERVIEW).pdf: $(OVERVIEW).tex
+$(OVERVIEW).pdf: $(OVERVIEW).tex $(OVERVIEW).bbl
 	if test ! -f $(OVERVIEW).aux; then pdflatex $(OVERVIEW).tex; fi
 	pdflatex $(OVERVIEW).tex
+
+$(SLIDES).pdf:	$(MP_SRCS:.mp=-0.mps) $(SLIDES).tex
+	pdflatex $(SLIDES).tex
 
 $(DESIGN).pdf:	$(MP_SRCS:.mp=-0.mps) $(TEX_SRCS) \
 		 $(DESIGN).tex $(DESIGN).bbl
@@ -55,14 +59,8 @@ $(SPEC).pdf:	$(MP_SRCS:.mp=-0.mps) $(TEX_SRCS) \
 	if test -f $(SPEC).idx; then $(MAKE) $(SPEC).ind; fi
 	pdflatex $(SPEC).tex
 
-$(THEORY).pdf:	$(MP_SRCS:.mp=-0.mps) $(TEX_SRCS) \
-		 $(THEORY).tex $(THEORY).bbl
-	if test ! -f $(THEORY).aux; then pdflatex $(THEORY).tex; fi
-	if test -f $(THEORY).idx; then $(MAKE) $(THEORY).ind; fi
-	pdflatex $(THEORY).tex
-
-CLEAN_FILES := $(PRIMER).pdf $(OVERVIEW).pdf \
-		$(DESIGN).pdf $(SPEC).pdf $(THEORY).pdf \
+CLEAN_FILES := $(PRIMER).pdf $(OVERVIEW).pdf $(SLIDES).pdf \
+		$(DESIGN).pdf $(SPEC).pdf \
 	$(wildcard *.log *.aux *.toc *.mps *.mpx) \
 	$(wildcard *.bbl *.blg *.ind *.idx *.ilg *.out)
 

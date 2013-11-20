@@ -1,3 +1,5 @@
+(herald "Denning-Sacco Protocol")
+
 (defprotocol denning-sacco basic
   (defrole init (vars (a b ks name) (k skey) (ta text))
     (trace

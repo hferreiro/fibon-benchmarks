@@ -1,4 +1,4 @@
-;;; Yahalom Protocol with Forwarding Removed
+(herald "Yahalom Protocol with Forwarding Removed")
 
 (defprotocol yahalom basic
   (defrole init

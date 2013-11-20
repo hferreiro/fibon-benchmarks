@@ -1,5 +1,5 @@
--- Types and functions used to construct an implementation of an
--- algebra.
+-- Exports the types and functions used to construct an implementation
+-- of an algebra.
 
 -- Each algebra provides an instance of each type class in the Algebra
 -- module, and exports its name, and its starting variable generator.
@@ -19,8 +19,9 @@
 
 module CPSA.Lib.CPSA (module CPSA.Lib.Utilities,
                       module CPSA.Lib.SExpr,
-                      module CPSA.Lib.Printer,
                       module CPSA.Lib.Pretty,
+                      module CPSA.Lib.Printer,
+                      module CPSA.Lib.Notation,
                       module CPSA.Lib.Algebra,
                       Event (..), flow) where
 
@@ -28,5 +29,6 @@ import CPSA.Lib.Utilities
 import CPSA.Lib.SExpr
 import CPSA.Lib.Pretty
 import CPSA.Lib.Printer
+import CPSA.Lib.Notation
 import CPSA.Lib.Algebra
 import CPSA.Lib.Protocol(Event (..), flow)

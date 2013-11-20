@@ -1,5 +1,307 @@
 CPSA NEWS -- history of user-visible changes.
 
+* Changes in version 2.3.1
+
+** Bug in priority ordering fixed.
+   This version reverses the sort predicate so that high numbered
+   priorities are considered first.  Nodes of priority zero will never
+   be solved.
+
+** This version fixes a bug in cohort filtering.
+   There may be changes to your output as the fix often produces more
+   skeletons.
+
+* Changes in version 2.3.0
+
+** Priorities for influencing search order added
+   The priority form in roles and skeletons allows the search to focus
+   on specific nodes of interest.
+
+** Role non-origination with position changed
+   A non-origination assumption of the form (3 a) now means the
+   assumption is add when the height of the strand is greater that 3.
+   It used to be added when the height of the strand is at least three.
+
+** Shape Analysis Sentence to Prover9 translator improved
+   Changed the formula translation algorithm so that predicates for
+   the sort declarations of variables are added to generated formulas.
+   Previously, the sort information was ignored.
+
+** Bug fixed in cpsaannotations
+
+* Changes in version 2.2.13
+
+** Better support for Cygwin users
+   Added optional extension for Cygwin users.  On Cygwin, put "export
+   EXE=.exe" in a startup file.
+
+** Bug fixed in src/perm.pl
+
+* Changes in version 2.2.12
+
+** Documentation improved
+   The introductory documentation has been improved and a set of
+   slides has been added that is aimed at new users.
+
+** JavaScript Object Notation (JSON) output supported
+   The CPSA pretty printer cpsapp produces JSON output when given the
+   -j or --json command-line option.  A CPSA string translates to a
+   JSON string in which the first and last characters are a double
+   quote.  A CPSA symbol translates directly to a JSON string.
+
+* Changes in version 2.2.11
+
+** Strand bounded runs produce more output
+   When a problem exceeds a strand bound, CPSA now produces every
+   skeleton within the strand bound before aborting.  Previously, it
+   would abort as soon as it produced one skeleton with too many
+   strands.  The output skeletons are no longer guaranteed to be
+   sequentially labeled when a strand bound violation occurs.
+
+** Include file support added
+   The CPSA preprocessor includes files as it expands macros.  The
+   syntax of the top-level include form is:
+
+       (include FILE)
+
+** The source file name is included as a comment in the output of CPSA
+
+* Changes in version 2.2.10
+
+** The Make.hs program now works with latest Haskell Platform
+   The imports have been changed so that it no longer uses the
+   haskell98 package, which is now hidden by default.
+
+* Changes in version 2.2.9
+
+** Penetrator non-origination assumptions added
+   Atoms declared to be pen-non-orig cannot be originated by the
+   adversary but can carried.  An atom assumed to be penetrator
+   non-originating can be used to model passwords and similar
+   concepts.  Several regular participants might know a password and
+   originate it in a run of a protocol, but an idealized password is
+   one the penetrator cannot guess.
+
+** Collapsing is performed before test solving
+   Previously, collapsing was performed on shapes and shapes that
+   could have been derived via a dead skeleton and collapsing where
+   missed.  For an example, see tst/preprocess.scm.
+
+** Disabling displacement option retired
+   The command-line option that disabled displacement has been removed.
+
+* Changes in version 2.2.8
+
+** Performance enhancement
+   In special circumstances, the generalization method called variable
+   separation takes too long.  A bound has been added that limits the
+   number of attempts to separate variables.  The result is CPSA may
+   report a skeleton is a shape when another is more general.
+
+** Pruning bug fixed
+   Pruning is never supposed to apply to strands in the image of the
+   point-of-view skeleton, but previous version did so.
+
+* Changes in version 2.2.7
+
+** A bug in the matcher in each algebra was repaired
+   There was a missing case involving asymmetric key inverse that
+   caused an erroneous matching failure.
+
+** Compiler warnings eliminated
+   The C preprocessor is now used to eliminate the warning that
+   the use of Data.Map.foldWithKey is deprecated while preserving the
+   ability to compile CPSA using GHC 6.x.
+
+** Diffie-Hellman algebra bug fixed
+   CPSA produces two listeners for the term (exp (exp (gen) x) y),
+   instead of one as it used to.  Test case tst/dhke.scm shows the bug
+   has been fixed.
+
+** Diffie-Hellman algebra documentation added
+   The document titled "Simple Diffie-Hellman Algebra" is in cpsasdha.pdf.
+
+* Changes in version 2.2.6
+
+** SVG tooltips work once again
+   The generated SVG diagrams display a tooltip for each role and node
+   in a skeleton.  The method used for specifying a tooltip stopped
+   working in recent versions of Firefox, so a new method was
+   implemented.  Tests show Chrome and IE 9 also now correctly display
+   tooltips.
+
+* Changes in version 2.2.5
+
+** Support for hashing added
+   Both the Basic and Diffie-Hellman term algebras have a new function
+   symbol hash that provides support for hashing.  The term (hash X)
+   is treated as a kind of encryption in which the term X is the
+   encryption key.
+
+* Changes in version 2.2.4
+
+** GHC link time option added
+   For GHC version 7.0.0 or greater, some runtime options used by CPSA
+   were turned off by default due to security concerns irrelevant to
+   CPSA.  The runtime options are now enabled.
+
+** Shape Analysis Sentences
+   The orig predicate was added to a description of a skeleton.
+   Without it, the important property of a shape analysis sentence
+   described in Theorem B.1 of The CPSA Specification does not hold.
+
+   Also, the Prolog program src/prover9.pl was added.  It translates
+   cpsalogic output into prover9 syntax.
+
+* Changes in version 2.2.3
+
+** New program added
+   The cpsalogic program extracts a formula in the language of
+   order-sorted first-order logic for each problem and its shapes from
+   a CPSA run. The formula is called a shape analysis sentence. The
+   formula is modeled by all realized skeletons when CPSA finds all
+   the shapes for the problem.  The sentence can be use with an
+   automated first-order theorem prover to verify security goals
+   associated with a protocol.
+
+   To support the cpsalogic program, cpsa was modified so that for
+   each shape, it prints a homomorphism from the point-of-view
+   skeleton to the shape.
+
+** Documentation updated
+   The CPSA Specification was extensively rewritten to improve
+   readability and reflect the current code base.  Appendix B was
+   added.  It describes the theory behind shape analysis sentences and
+   cpsalogic.
+
+   The CPSA Design was updated to reflect the current code base and a
+   section was added that describes the modules in the source code.
+
+** Pruning bug fixed
+   A coding error that lead to unjustified pruning has been fixed.
+
+* Changes in version 2.2.2
+
+** Completeness problem corrected
+   Added an new condition to the solved filter so that CPSA now finds
+   the shape in targetterms8.
+
+** Performance problem corrected
+   Corrected a memory consumption problem exhibited by Wang's Fair
+   Exchange Protocol.  Before the correction, CPSA used 1.9GB of
+   memory, afterwords, it uses 3MB.
+
+** Non-ASCII accepted as input
+   Non-ASCII letters are accepted as constituents of symbols and
+   strings.
+
+* Changes in version 2.2.1
+
+** Web graph output extension changed from .xml to .xhtml
+   Firefox works better with this file extension.
+
+** No HTML5 sliders
+   The zoom option for cpsagraph no longer generates HTML5 sliders due
+   to changes designed to make large documents load faster.
+
+** Program cpsagraph tree construction algorithm improved
+   The time and space used to form derivation trees has been reduced.
+
+** Treeless option added to cpsagraph
+   For input too large to process otherwise, option --treeless
+   generates an XHTML document without trees, and therefore uses less
+   memory.  It works as long as each skeleton in the input fits into
+   memory.  The default XHTML generator requires that all skeletons
+   fit in memory simultaneously.
+
+** Output bug in cpsadiff fixed
+   A bug in cpsadiff that caused it to fail to print all of its output
+   before it exited has been fixed.
+
+* Changes in version 2.2.0
+
+** Pruning reverted to CPSA 2.1.0 behavior
+   Pruning once again occurs after contractions and listener
+   augmentations.  We found examples where it is essential to prune
+   after a contraction.  We are exploring other ways of addressing the
+   completeness problems due to pruning.
+
+** Runtime options can be specified within a file
+   The herald form has been added.  It allows one to specify most of
+   the options currently specified on the command line within a file.
+   For example, to specify the option --bound=12 within a file, write:
+
+   (herald "Needham-Schroeder Public-Key Protocol" (bound 12))
+
+** Role annotation influences test node search algorithm
+   If a role includes (reverse-search) in its association list, the
+   order in which the nodes of a strand that is an instance of this
+   role is search for a test node will be reversed.  By default, CPSA
+   selects the earliest test node in a strand, but with this
+   annotation, it will select the latest one.
+
+** CPSA specific diff program added
+   The program cpsadiff has been added.  The program compares two CPSA
+   output files S-expression by S-expression, and prints the first
+   skeleton that differs.  For Windows users, there is now a diff
+   program available without installing MSYS or Cygwin.
+
+** Some programs gently handle incomplete S-expressions
+   When a CPSA run is aborted, it may produce an incomplete
+   S-expression.  The programs cpsagraph, cpsashapes, and cpsapp,
+   treat an incomplete S-expression as end-of-file, and print a
+   warning message.  This change makes it easier to analyze runs that
+   fail to terminate.
+
+** Blue marks realized reception nodes
+   The program cpsagraph uses the color blue to distinguish realized
+   reception nodes from transmission nodes.
+
+** Diagram scalers added
+   When viewing large outputs in cpsagraph's expanded format, by
+   supplying the --zoom option, one gets controls that allow SVG
+   diagrams to be scaled.
+
+* Changes in version 2.1.2
+
+** Displacement on by default
+Displacement is on by default and the sense of the -d switch has been
+changed.  It now disables displacement.
+
+** Diffie-Hellman support changed
+Previous support for Diffie-Hellman had serious problems for which we
+have no solutions at this time.  We recognize now that the concepts of
+unique origination and non-origination as currently defined do not fit
+in well with an implementation of Diffie-Hellman in which exponents
+are an Abelian group.
+
+For now, we provide simplified Diffie-Hellman support with an algebra
+that has an equation for the commutativity of exponents, but no other
+equation.
+
+	    (exp (exp (gen) x) y) = (exp (exp (gen) y) x)
+
+This algebra is an attempt to provide some kind of Diffie-Hellman
+support within the current framework while we search for the proper
+framework.
+
+* Changes in version 2.1.1
+
+** Graph program handles incomplete output
+The graph program no longer requires that every seen child mentioned
+in the output is in it.  Therefore, the program can handle output from
+some interrupted runs.
+
+** Pruning restriction
+We found examples in which pruning prevented us from finding some
+shapes.  Pruning is now performed only after augmentation, and only
+when the augmented strand is involved.
+
+** Compact output notation
+There is a new infix notation for XHTML and LaTeX output that is more
+compact, and hopefully more readable for large problems.  Enable it by
+specifying the -i flag when invoking cpsagraph or cpsapp.
+
 * Changes in version 2.1.0
 
 ** Initial comments displayed
@@ -87,7 +389,6 @@ variables.
 Makefiles use the *.sch the extension for problems that use
 Diffie-Hellman.
 
-
 * Changes in version 1.5.5
 
 ** Encryption tests solved before nonce tests
@@ -167,7 +468,7 @@ short to inherit a unique origination assumption.
 
 ** Outer most encryptions preferred for encryption tests
 When choosing among encryptions for critical messages, CPSA prefers
-outer most encryptions over ones within another encryption. 
+outer most encryptions over ones within another encryption.
 
 * Changes in version 1.4.8
 
@@ -402,7 +703,7 @@ In previous version, role variables were printed in reverse order.
 The name of the first protocol is included in the title of the
 generated XML document.
 
-** Testing showed enabling multiprocess support gives no speedup. 
+** Testing showed enabling multiprocess support gives no speedup.
 
 * Changes in version 1.2.2
 

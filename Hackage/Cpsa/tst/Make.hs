@@ -1,6 +1,6 @@
 -- A simple, CPSA specific make system
 
-module Make (cpsa, shapes, annos, cleanse, get, set,
+module Make (cpsa, shapes, logic, annos, params, cleanse, get, set,
              build, clean, roots) where
 
 {- Place a copy of this source file in the directory used to store
@@ -14,24 +14,29 @@ To analyze a problem in prob.scm, type:
 
 *Make> cpsa "prob"
 
-If successful, the analysis is in the file prob.xml, which can be
+If successful, the analysis is in the file prob.xhtml, which can be
 viewed with a standards-compliant browser.
-
-To analyze a problem in prob.sch using the Diffie-Hellman algebra, type:
-
-*Make> cpsa "prob"
 
 For a shapes only version of the analysis, type:
 
 *Make> shapes "prob"
 
-If successful, the shapes are in the file prob_shapes.xml.
+If successful, the shapes are in the file prob_shapes.xhtml.
+
+*Make> logic "prob"
+
+If successful, the shape analysis sentences are in the file
+prob_logic.text.
 
 When the protocol is annotated with rely-guarantee formulas, type:
 
 *Make> annos "prob"
 
-If successful, the annotated shapes are in the file prob_annotations.xml.
+If successful, the annotated shapes are in the file prob_annotations.xhtml.
+
+*Make> params "prob"
+
+If successful, roles with parameter descriptions are in prob_parameters.txt.
 
 To remove the files generated from source files, type:
 
@@ -58,7 +63,8 @@ To remove the files generated from source files in the directory, type:
 import Control.Monad (mapM_)
 import Data.List (sort)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
-import System (ExitCode (..), system)
+import System.Exit (ExitCode (..))
+import System.Process (system)
 import System.IO (putStrLn)
 import System.IO.Unsafe (unsafePerformIO)
 import System.FilePath (FilePath, splitExtension)
@@ -69,6 +75,11 @@ import System.Directory (removeFile, doesFileExist, getModificationTime,
 
 initialCpsaFlags :: String
 initialCpsaFlags = "+RTS -M512m -RTS"
+
+graphFlags :: String
+graphFlags = ""
+-- To enable zooming, use:
+-- graphFlags = " -z"
 
 -- A mutable location for CPSA flags
 cpsaFlags :: IORef String
@@ -99,7 +110,7 @@ graph root =
 
 graphRule :: Rule
 graphRule =
-    Rule { prog = "cpsagraph -x",
+    Rule { prog = "cpsagraph" ++ graphFlags,
            inputExt = cpsaExt,
            outputExt = graphExt }
 
@@ -108,17 +119,9 @@ graphRule =
 cpsa :: FilePath -> IO ()
 cpsa root =
     do
-      cpsaAll root
+      cpsaBasic root
       shapes root
       graph root
-
-cpsaAll :: FilePath -> IO ()
-cpsaAll root =
-    do
-      exists <- doesFileExist (root ++ sourceDhExt)
-      case exists of
-        True -> cpsaDh root
-        False -> cpsaBasic root
 
 -- CPSA using Basic rule
 
@@ -134,26 +137,12 @@ cpsaBasicRule flags =
            inputExt = sourceBasicExt,
            outputExt = cpsaExt }
 
--- CPSA using Diffie-Hellman Rule
-
-cpsaDh :: FilePath -> IO ()
-cpsaDh root =
-    do
-      flags <- get               -- get CPSA flags
-      make (cpsaDhRule flags) root -- make CPSA output using given rule
-
-cpsaDhRule :: String -> Rule
-cpsaDhRule flags =
-    Rule { prog = "cpsa -a diffie-hellman " ++ flags,
-           inputExt = sourceDhExt,
-           outputExt = cpsaExt }
-
 -- Shapes Rule
 
 shapes :: FilePath -> IO ()
 shapes root =
     do
-      cpsaAll root              -- Run CPSA if need be
+      cpsaBasic root            -- Run CPSA if need be
       make shapesRule root
       graph $ root ++ shapesRoot
 
@@ -162,6 +151,20 @@ shapesRule =
     Rule { prog = "cpsashapes",
            inputExt = cpsaExt,
            outputExt = shapesRoot ++ cpsaExt }
+
+-- Logic Rule
+
+logic :: FilePath -> IO ()
+logic root =
+    do
+      cpsaBasic root            -- Run CPSA if need be
+      make logicRule root
+
+logicRule :: Rule
+logicRule =
+    Rule { prog = "cpsalogic",
+           inputExt = cpsaExt,
+           outputExt = logicExt }
 
 -- Annotations Rule
 
@@ -189,7 +192,7 @@ cpsaparametersRule :: Rule
 cpsaparametersRule =
     Rule { prog = "cpsaparameters",
     	   inputExt = sourceBasicExt,
-	   outputExt = paramsExt }
+	   outputExt = paramsRoot ++ cpsaExt }
 
 -- Clean generated files
 
@@ -200,17 +203,15 @@ cleanse root =
       rm $ root ++ graphExt
       rm $ root ++ shapesRoot ++ cpsaExt
       rm $ root ++ shapesRoot ++ graphExt
+      rm $ root ++ logicExt
       rm $ root ++ annosRoot ++ cpsaExt
       rm $ root ++ annosRoot ++ graphExt
+      rm $ root ++ paramsRoot ++ cpsaExt
 
 -- File Extensions
 
 sourceBasicExt :: String
 sourceBasicExt = ".scm"
-
--- Diffie-hellman source file
-sourceDhExt :: String
-sourceDhExt = ".sch"
 
 cpsaExt :: String
 cpsaExt = ".txt"
@@ -218,14 +219,17 @@ cpsaExt = ".txt"
 shapesRoot :: String
 shapesRoot = "_shapes"
 
+logicExt :: String
+logicExt = "_logic.text"
+
 annosRoot :: String
 annosRoot = "_annotations"
 
-graphExt :: String
-graphExt = ".xml"
+paramsRoot :: String
+paramsRoot = "_parameters"
 
-paramsExt :: String
-paramsExt = ".params"
+graphExt :: String
+graphExt = ".xhtml"
 
 -- Rule Interpreters
 
@@ -303,7 +307,7 @@ roots exts =
 build :: IO ()
 build =
     do
-      probs <- roots [sourceBasicExt, sourceDhExt]
+      probs <- roots [sourceBasicExt]
       mapM_ cpsa probs
 
 -- Clean files generated for all the source files in the current directory.
@@ -311,5 +315,5 @@ build =
 clean :: IO ()
 clean =
     do
-      probs <- roots [sourceBasicExt, sourceDhExt]
+      probs <- roots [sourceBasicExt]
       mapM_ cleanse probs

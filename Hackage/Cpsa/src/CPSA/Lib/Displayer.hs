@@ -1,4 +1,4 @@
--- Displayer for protocols and preskeletons
+-- Displays protocols and preskeletons as S-expressions.
 
 -- Copyright (c) 2009 The MITRE Corporation
 --
@@ -17,22 +17,23 @@ import CPSA.Lib.Strand
 
 -- Display of protocols
 
-displayProt :: Algebra t p g s e c => Prot t p g s e c -> SExpr ()
+displayProt :: Algebra t p g s e c => Prot t g -> SExpr ()
 displayProt p =
     L () (S () "defprotocol" : S () (pname p) : S () (alg p) : rs)
     where
       rs = foldl f (pcomment p) (reverse (roles p))
       f rs r = displayRole r : rs
 
-displayRole :: Algebra t p g s e c => Role t p g s e c -> SExpr ()
+displayRole :: Algebra t p g s e c => Role t -> SExpr ()
 displayRole r =
     L () (S () "defrole" :
           S () (rname r) :
           L () (S () "vars" : displayVars ctx vars) :
           L () (S () "trace" : displayTrace ctx (rtrace r)) :
           displayOptional "non-orig" (displayLenTerms ctx (rnon r))
-          (displayOptional "uniq-orig" (displayTerms ctx (runique r))
-           (rcomment r)))
+          (displayOptional "pen-non-orig" (displayLenTerms ctx (rpnon r))
+           (displayOptional "uniq-orig" (displayTerms ctx (runique r))
+           (rcomment r))))
     where
       ctx = varsContext vars
       vars = rvars r
@@ -57,7 +58,7 @@ displayOptional key value rest =
     L () (S () key : value) : rest
 
 displayTrace :: Algebra t p g s e c => c ->
-                Trace t p g s e c -> [SExpr ()]
+                Trace t -> [SExpr ()]
 displayTrace ctx trace =
     map displayDt trace
     where
@@ -66,12 +67,12 @@ displayTrace ctx trace =
 
 -- Display of preskeletons
 
-displayPreskel :: Algebra t p g s e c => Preskel t p g s e c ->
+displayPreskel :: Algebra t p g s e c => Preskel t g s e ->
                   [SExpr ()] -> SExpr ()
 displayPreskel k rest =
     L () (S () "defskeleton" :
           S () (pname (protocol k)) :
-          L () (S () "vars" : displayVars ctx (L.sort vars)) :
+          L () (S () "vars" : displayVars ctx vars) :
           foldr f (displayRest k ctx rest) (insts k))
     where
       ctx = varsContext vars
@@ -79,20 +80,27 @@ displayPreskel k rest =
       f i rest = displayInst ctx i : rest
 
 -- Display the remainder of a preskeleton
-displayRest :: Algebra t p g s e c => Preskel t p g s e c ->
+displayRest :: Algebra t p g s e c => Preskel t g s e ->
                c -> [SExpr ()] -> [SExpr ()]
 displayRest k ctx rest =
     displayOptional "precedes" (displayOrdering (orderings k))
      (displayOptional "non-orig" (displayTerms ctx (knon k))
-      (displayOptional "uniq-orig" (displayTerms ctx (kunique k))
-       (kcomment k ++
-        (displayOperation k ctx
-         (displayOptional "traces" traces rest)))))
+      (displayOptional "pen-non-orig" (displayTerms ctx (kpnon k))
+       (displayOptional "uniq-orig" (displayTerms ctx (kunique k))
+        (displayOptional "priority" priorities
+         (kcomment k ++
+          (displayOperation k ctx
+           (displayOptional "traces" traces rest)))))))
     where
+      priorities = map displayPriority (kpriority k)
       traces = map (L () . displayTrace ctx . trace) (insts k)
 
+displayPriority :: (Node, Int) -> SExpr ()
+displayPriority (n, p) =
+    L () [displayNode n, N () p]
+
 displayInst :: Algebra t p g s e c => c ->
-               Instance t p g s e c -> SExpr ()
+               Instance t e -> SExpr ()
 displayInst ctx s =
     case listenerTerm s of
       Just t -> L () [S () "deflistener", displayTerm ctx t]
@@ -123,7 +131,7 @@ displayNode :: Node -> SExpr ()
 displayNode (s, p) = L () [N () s, N () p]
 
 -- Display the reason the preskeleton was created
-displayOperation :: Algebra t p g s e c => Preskel t p g s e c ->
+displayOperation :: Algebra t p g s e c => Preskel t g s e ->
                     c -> [SExpr ()] -> [SExpr ()]
 displayOperation k ctx rest =
     case operation k of

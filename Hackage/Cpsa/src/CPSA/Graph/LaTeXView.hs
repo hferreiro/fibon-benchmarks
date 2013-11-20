@@ -1,4 +1,4 @@
--- Generates a text view of CPSA S-expressions as a LaTeX document.
+-- Generates a text view of CPSA output as a LaTeX document.
 
 -- Copyright (c) 2009 The MITRE Corporation
 --
@@ -10,39 +10,49 @@ module CPSA.Graph.LaTeXView (latexView) where
 
 import System.IO
 import CPSA.Lib.CPSA (nats, SExpr, Pos)
-import CPSA.Lib.Entry (writeSExpr)
 import CPSA.Graph.Loader
 import CPSA.Graph.Layout
 
+type Printer a = Int -> Int -> SExpr a -> String
+
 -- Main entry point
-latexView :: Handle -> Int -> [SExpr Pos] -> [Preskel] -> IO ()
-latexView h margin cmts ps =
+latexView :: Handle -> Int -> Printer Pos -> [SExpr Pos] ->
+             Preskel -> State -> IO ()
+latexView h margin pp cmts k s =
     do
       hPutStrLn h "\\usepackage[matrix,arrow,curve]{xy}"
       hPutStrLn h "\\begin{document}"
       hPutStrLn h "\\begin{verbatim}"
-      mapM_ (writeSExpr h margin) cmts
+      mapM_ (writeItem h margin pp) cmts
       hPutStrLn h "\\end{verbatim}"
-      mapM_ (writeLnPreskel h margin) ps
-      hPutStrLn h "\n\\end{document}"
-      hClose h
-      return ()
+      writeLnPreskel h margin pp k s
 
-writeLnPreskel :: Handle -> Int -> Preskel -> IO ()
-writeLnPreskel h m k =
+-- Write each preskeleton
+writeLnPreskel :: Handle -> Int -> Printer Pos -> Preskel -> State -> IO ()
+writeLnPreskel h m pp k s =
     do
       case parent k of          -- Write protocol with first preskeleton
         Nothing ->
             do
+              hPutStrLn h (showString "\n\\paragraph{Tree " $
+                                      shows (label k) "}\n")
               hPutStrLn h "\n\\begin{verbatim}"
-              writeSExpr h m (protSrc k)
+              writeItem h m pp (protSrc k)
               hPutStrLn h "\\end{verbatim}"
         Just _ -> return ()
       hPutStrLn h (showString "\n\\paragraph{Label " $ shows (label k) "}\n")
       hPutStrLn h (show (matrix k))
       hPutStrLn h "\n\\begin{verbatim}"
-      writeSExpr h m (preskelSrc k)
+      writeItem h m pp (preskelSrc k)
       hPutStrLn h "\\end{verbatim}"
+      n <- loadNext s
+      case n of
+        Nothing ->              -- EOF
+            do
+              hPutStrLn h "\n\\end{document}"
+              hClose h
+        Just (k, s) ->
+            writeLnPreskel h m pp k s
 
 -- XY-pic output
 
@@ -55,7 +65,7 @@ data Entry                      -- An entry in a row
     | Item { tag :: Maybe String, -- Maybe place text, else use bullet
              len :: Int,          -- Length of the strand succession arrow
                                   -- Communication arrows, bend arrows
-             adj :: [(Int, Int, Bool)] } -- when bool is True
+             adj :: [(Int, Int, Bool, Bool)] } -- when second bool is True
 
 -- Construct the matrix for a preskeleton
 matrix :: Preskel -> Matrix
@@ -72,10 +82,14 @@ matrix k =
             Just v -> item c r v -- Grid point has content
       item c r v =
           let len = maybe 0 (\v'->rank (vnode v') - r) (next v)
-              adj = map (shift (c, r) . rankNode . vnode) (succs v) in
+              adj = map (style c r v) (succs v) in
           Item { tag = Nothing, len = len, adj = map (curve c r) adj }
-      curve c r (x, y) =        -- Decide if an arrows is curved
-          (x, y, abs x > 1 && bend)
+      style c r src dst =
+          (msg src == msg dst, x, y)
+          where
+            (x, y) = shift (c, r) $ rankNode $ vnode dst
+      curve c r (solid, x, y) = -- Decide if an arrows is curved
+          (x, y, solid, abs x > 1 && bend)
           where
             bend = y /= 0 || any (obstruction c r) (between x)
       obstruction c r x =       -- Is there an obstruction here?
@@ -126,12 +140,15 @@ instance Show Entry where
                  else
                      id
           comm [] = id
-          comm ((x, y, bend) : cs) =
+          comm ((x, y, solid, bend) : cs) =
               showString ar . horiz x . vert y . showChar ']' . comm cs
               where
-                ar = if not bend then "\\ar["
-                     else if x > 0 then "\\ar@/_/["
-                          else "\\ar@/^/["
+                curve = case () of
+                        _ | not bend -> "["
+                          | x > 0 -> "@/_/["
+                          | otherwise -> "@/^/["
+                style = if solid then "" else "@{-->}"
+                ar = "\\ar" ++ style ++ curve
 
 vert :: Int -> ShowS
 vert n =
@@ -146,3 +163,12 @@ horiz n =
       LT -> showChar 'l' . horiz (succ n)
       EQ -> id
       GT -> showChar 'r' . horiz (pred n)
+
+-- Writer
+writeItem :: Handle -> Int -> Printer a -> SExpr a -> IO ()
+writeItem h margin pp sexpr =
+    hPutStrLn h (pp margin indent sexpr)
+
+-- S-expression pretty print parameters
+indent :: Int
+indent = 2

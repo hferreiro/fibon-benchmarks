@@ -6,13 +6,32 @@
 -- modify it under the terms of the BSD License as published by the
 -- University of California.
 
-module CPSA.Graph.Preskeleton (kdraw) where
+module CPSA.Graph.Preskeleton (skel) where
 
+import CPSA.Lib.CPSA (SExpr, printMsg, printEnv)
 import CPSA.Graph.XMLOutput
 import CPSA.Graph.Config
 import CPSA.Graph.SVG
 import CPSA.Graph.Loader
 import CPSA.Graph.Layout
+
+showMsg :: Config -> SExpr a -> String
+showMsg conf x =
+    case notation conf of
+      Prefix -> show x
+      Infix -> printMsg margin indent x
+
+showEnv :: Config -> SExpr a -> String
+showEnv conf x =
+    case notation conf of
+      Prefix -> show x
+      Infix -> printEnv margin indent x
+
+margin :: Int
+margin = 1024
+
+indent :: Int
+indent = 0
 
 -- Compute a node's position.
 npos :: Config -> Rank -> Node -> (Float, Float)
@@ -41,17 +60,22 @@ addEdge conf rank src x1 y1 elements n =
 
 sameMsg :: Vertex -> Vertex -> Bool
 sameMsg src dest =
-    drop 6 (msg src) == drop 6 (msg dest)
+    msg src == msg dest
 
 -- Add a strand node
 addNode :: Config -> Preskel -> Rank -> [Element] -> Vertex -> [Element]
 addNode conf k rank elements node =
     let (x, y) = npos conf rank (vnode node)
-        color = elem node (maybe [] id (unrealized k))
-        bullet = circ conf color x y
-        es = tooltip (msg node) [bullet] : elements
+        bullet = circ conf (nodeColor k node) x y
+        es = tooltip (showMsg conf $ msg node) [bullet] : elements
         es' = foldl (addEdge conf rank node x y) es (succs node) in
     maybe es' (addNode conf k rank es') (next node)
+
+nodeColor :: Preskel -> Vertex -> Maybe String
+nodeColor k node
+    | out node = Nothing        -- Transmission nodes are black
+    | elem node (maybe [] id (unrealized k)) = Just "red"
+    | otherwise = Just "blue"   -- Realized nodes are blue
 
 -- Add role above a strand
 addRole :: Config -> [Element] -> Vertex -> [Element]
@@ -59,7 +83,7 @@ addRole conf es node =
     if null r then
         es
     else
-        tooltip e [text conf x y r] : es
+        tooltip (showEnv conf e) [text conf x y r] : es
     where
       r = role node
       e = env node
@@ -91,13 +115,10 @@ title conf k =
             _ -> ""
 
 -- Draw a preskeleton
-kdraw :: Config -> Float -> Float -> Preskel -> (Float, Float, Element)
-kdraw conf x y k =
-    (w, h, ec "svg" attrs (rect conf 0 0 w h : lines))
+skel :: Config -> Preskel -> (Float, Float, [Element])
+skel conf k =
+    (w, h, lines)
     where
-      attrs = [("id", "k" ++ show (label k)), ("x", showL x),
-               ("y", showL y), ("width", showL w), ("height", showL h)] ++
-              if compact conf then [("visibility", "hidden")] else []
       (w, h) = dim conf (strands k) (maxRank k rank)
       circs = foldl (addNode conf k rank) (title conf k) (initial k)
       lines = foldl (addStrand conf rank) circs (initial k)

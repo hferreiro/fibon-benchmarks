@@ -1,4 +1,10 @@
-(defprotocol epmo_acctnum basic
+(herald "Electronic Purchase with Money Order Protocol Variant"
+  (bound 12)
+  (comment "This version includes account numbers in exchanges"
+	   "This version uses sorts to avoid confusion"
+	   "between a nonce and other data"))
+
+(defprotocol sorted_epmo_acctnum basic
   (defrole bank
     (vars (b c m name) (acctnum price text) (hash name) (nc nm nb data))
     (trace
@@ -71,13 +77,13 @@
               (authtransfer c acctnum2 b price m nm)))))
       (3 (and (reqtransfer m b price m nm) (doship m goods c))))))
 
-(defskeleton epmo_acctnum
+(defskeleton sorted_epmo_acctnum
   (vars (b m c name) (nm nc nb data) (hash name))
   (defstrand merchant 4 (b b) (m m) (c c) (nm nm) (nc nc) (nb nb) (hash hash))
   (non-orig (privk b) (privk m) (privk c) (privk hash))
   (uniq-orig nm nc nb))
 
-(defskeleton epmo_acctnum
+(defskeleton sorted_epmo_acctnum
   (vars (b m c name) (nm nb nc data) (hash name) (price acctnum text))
   (defstrand bank 3 (b b) (m m) (c c) (nm nm) (nb nb) (nc nc) (hash hash))
   (non-orig (privk b) (privk m) (privk c) (privk hash))

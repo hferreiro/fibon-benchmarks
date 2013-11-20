@@ -1,50 +1,53 @@
 # When the binary changes, run the test suite, and look for changes in
-# the output.  The changes are not fatal errors, but for a *.sc{m,h} input
+# the output.  The changes are not fatal errors, but for a *.scm input
 # file, an error produced by the binary is fatal.
 
 TSTS	:= $(patsubst %.scm,%.txt,$(wildcard *.scm)) \
-		$(patsubst %.lsp,%.txt,$(wildcard *.lsp)) \
-		$(patsubst %.sch,%.txt,$(wildcard *.sch))
-PROG	= ../dist/build/cpsa/cpsa
+		$(patsubst %.lsp,%.txt,$(wildcard *.lsp))
+CPSA	= ../dist/build/cpsa/cpsa$(EXE)
+DIFF	= ../dist/build/cpsadiff/cpsadiff$(EXE)
+SHAPES	= ../dist/build/cpsashapes/cpsashapes$(EXE)
+LOGIC	= ../dist/build/cpsalogic/cpsalogic$(EXE)
+ANNOTATIONS = ../dist/build/cpsaannotations/cpsaannotations$(EXE)
+GRAPH	= ../dist/build/cpsagraph/cpsagraph$(EXE)
 CPSAFLAGS = +RTS -M512m -RTS
 
 # The expected answers are in files with the .tst extension.
 
 # Analyze protocols for shapes expecting success
-%.txt:	%.scm $(PROG)
-	$(PROG) $(CPSAFLAGS) -o $@ $*.scm
-	-diff -u $*.tst $*.txt
+%.txt:	%.scm $(CPSA)
+	$(CPSA) $(CPSAFLAGS) -o $@ $*.scm
+	-$(DIFF) $(DIFFFLAGS) $*.tst $*.txt
 
 # Analyze protocols for shapes expecting failure
-%.txt:	%.lsp $(PROG)
-	-$(PROG) $(CPSAFLAGS) -o $@ $*.lsp
-	-diff -u $*.tst $*.txt
-
-# Analyze protocols for shapes expecting success using Diffie-Hellman
-%.txt:	%.sch $(PROG)
-	$(PROG) $(CPSAFLAGS) -a diffie-hellman -o $@ $*.sch
-	-diff -u $*.tst $*.txt
+%.txt:	%.lsp $(CPSA)
+	-$(CPSA) $(CPSAFLAGS) -o $@ $*.lsp
+	-$(DIFF) $(DIFFFLAGS) $*.tst $*.txt
 
 # Extract shapes
 %_shapes.txt:	%.txt
-	../dist/build/cpsashapes/cpsashapes -o $@ $<
+	$(SHAPES) $(SHAPESFLAGS) -o $@ $<
+
+# Extract shape analysis sentences
+%_logic.text:	%.txt
+	$(LOGIC) $(LOGICFLAGS) -o $@ $<
 
 # Annotate shapes
 %_annotations.txt:	%_shapes.txt
-	../dist/build/cpsaannotations/cpsaannotations -o $@ $<
+	$(ANNOTATIONS) $(ANNOTATIONSFLAGS) -o $@ $<
 
 # Visualize output
 %.svg:		%.txt
-	../dist/build/cpsagraph/cpsagraph -c -o $@ $<
+	$(GRAPH) -c -o $@ $<
 
 # Visualize output using the expanded format
-%.xml:		%.txt
-	../dist/build/cpsagraph/cpsagraph -o $@ $<
+%.xhtml:	%.txt
+	$(GRAPH) $(GRAPHFLAGS) -o $@ $<
 
 .PRECIOUS:	%.txt %_shapes.txt %_annotations.txt
 
-all:	$(TSTS) $(patsubst %.txt,%.xml,$(TSTS)) \
-		$(patsubst %.txt,%_shapes.xml,$(TSTS))
+all:	$(patsubst %.txt,%.xhtml,$(TSTS)) \
+		$(patsubst %.txt,%_shapes.xhtml,$(TSTS))
 
 clean:
-	-rm *.txt *.xml
+	-rm *.txt *.xhtml

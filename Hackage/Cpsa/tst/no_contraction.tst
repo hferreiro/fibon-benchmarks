@@ -1,5 +1,5 @@
-(comment "CPSA 2.1.0")
-(comment "All input read")
+(comment "CPSA 2.3.1")
+(comment "All input read from no_contraction.scm")
 
 (defprotocol no-contraction basic
   (defrole init
@@ -18,7 +18,9 @@
   (traces ((recv (enc n (privk a))))
     ((send (enc (enc n (privk a-0)) (pubk b)))))
   (label 0)
-  (unrealized (0 0)))
+  (unrealized (0 0))
+  (preskeleton)
+  (comment "Not a skeleton"))
 
 (defskeleton no-contraction
   (vars (n text) (a a-0 b name))
@@ -32,6 +34,7 @@
   (label 1)
   (parent 0)
   (unrealized (0 0))
+  (origs (n (1 0)))
   (comment "1 in cohort - 1 not yet seen"))
 
 (defskeleton no-contraction
@@ -41,13 +44,15 @@
   (precedes ((1 0) (0 0)))
   (non-orig (privk a))
   (uniq-orig n)
-  (operation encryption-test (added-strand init 1) (enc n (privk a))
+  (operation encryption-test (displaced 2 1 init 1) (enc n (privk a-0))
     (0 0))
   (traces ((recv (enc n (privk a))))
     ((send (enc (enc n (privk a)) (pubk b)))))
   (label 2)
   (parent 1)
   (unrealized)
-  (shape))
+  (shape)
+  (maps ((0 1) ((a a) (n n) (a-0 a) (b b))))
+  (origs (n (1 0))))
 
 (comment "Nothing left to do")

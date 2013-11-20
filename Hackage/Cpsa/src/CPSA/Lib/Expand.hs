@@ -1,4 +1,4 @@
--- Expands macros using definitions in the input
+-- Expands macros using definitions in the input.
 
 -- Copyright (c) 2009 The MITRE Corporation
 --
@@ -6,31 +6,70 @@
 -- modify it under the terms of the BSD License as published by the
 -- University of California.
 
-module CPSA.Lib.Expand (expand) where
+module CPSA.Lib.Expand (expand, readSExprs) where
 
 import Control.Monad
+import System.IO (openFile, IOMode (ReadMode))
+import CPSA.Lib.Entry (readSExpr, tryIO)
 import CPSA.Lib.CPSA
 
 -- The macroexpand loop limit
 limit :: Int
 limit = 1000
 
-expand :: Monad m => [SExpr Pos] -> m [SExpr Pos]
+-- Include bound
+bound :: Int
+bound = 16
+
+expand :: [SExpr Pos] -> IO [SExpr Pos]
 expand sexprs =
     do
-      (_, sexprs) <- foldM expandSExpr ([], []) sexprs
+      (_, sexprs) <- foldM (expandSExpr bound) ([], []) sexprs
       return (reverse sexprs)
 
-expandSExpr :: Monad m => ([Macro], [SExpr Pos]) -> SExpr Pos ->
-               m ([Macro], [SExpr Pos])
-expandSExpr (macs, sexprs) (L pos (S _ "defmacro" : xs)) =
+expandSExpr :: Int -> ([Macro], [SExpr Pos]) -> SExpr Pos ->
+               IO ([Macro], [SExpr Pos])
+expandSExpr _ (macs, sexprs) (L pos (S _ "defmacro" : xs)) =
     do                          -- Process a macro definition
       mac <- defmacro pos xs
       return (mac : macs, sexprs)
-expandSExpr (macs, sexprs) sexpr =
+expandSExpr bound (macs, sexprs) (L pos [S _ "include", Q _ file]) =
+    if bound <= 0 then
+      fail (shows pos ("Include depth exceeded with file " ++ file))
+    else
+      include (bound - 1) (macs, sexprs) pos file
+expandSExpr _ (macs, sexprs) sexpr =
     do                          -- Process all other S-expressions
       sexpr <- expandAll macs sexpr
       return (macs, sexpr : sexprs)
+
+-- The include form is processed here.
+
+include :: Int -> ([Macro], [SExpr Pos]) -> Pos -> String ->
+           IO ([Macro], [SExpr Pos])
+include bound (macs, sexprs) pos file =
+    do
+      input <- tryIO (openFile file ReadMode)
+      case input of
+        Left err -> fail (shows pos ("File " ++ file ++ ": " ++ err))
+        Right input ->
+          do
+            p <- posHandle file input
+            incsexprs <- readSExprs p
+            foldM (expandSExpr bound) (macs, sexprs) incsexprs
+
+readSExprs :: PosHandle -> IO [SExpr Pos]
+readSExprs p =
+    loop []
+    where
+      loop xs =
+          do
+            x <- readSExpr p
+            case x of
+              Nothing ->
+                  return $ reverse xs
+              Just x ->
+                  loop (x:xs)
 
 -- A macro definition is of the form:
 --

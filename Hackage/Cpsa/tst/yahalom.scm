@@ -1,4 +1,4 @@
-;;; Yahalom Protocol with Forwarding Removed
+(herald "Yahalom Protocol Without Forwarding" (bound 15))
 
 (defprotocol yahalom basic
   (defrole init

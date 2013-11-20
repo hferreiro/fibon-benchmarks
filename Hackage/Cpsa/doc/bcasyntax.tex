@@ -3,18 +3,21 @@ shown in Table~\ref{tab:syntax}.  The start grammar symbol is
 \textsc{file}, and the terminal grammar symbols are: \textsc{(, ),
   symbol, string, integer,} and the constants set in typewriter font.
 
-The \textsc{prot-alist}, \textsc{role-alist}, and \textsc{skel-alist}
-productions are Lisp style association lists, that is, lists of
-key-value pairs, where every key is a symbol.  Key-value pairs with
-unrecognized keys are ignored, and are available for use by other
-tools.  On output, unrecognized key-value pairs are preserved when
-printing protocols, but elided when printing skeletons.
+The \textsc{alist}, \textsc{prot-alist}, \textsc{role-alist},
+and \textsc{skel-alist} productions are Lisp style association lists,
+that is, lists of key-value pairs, where every key is a symbol.
+Key-value pairs with unrecognized keys are ignored, and are available
+for use by other tools.  On output, unrecognized key-value pairs are
+preserved when printing protocols, but elided when printing skeletons.
 
 \begin{table}
 \newcommand{\sym}[1]{\textup{\texttt{#1}}}
 \begin{center}\scshape
 \begin{tabular}{rcl}
-file&$\leftarrow$&form+
+file&$\leftarrow$&herald?~form+
+\\herald&$\leftarrow$&
+(\sym{herald}~title~alist)
+\\title&$\leftarrow$&$\mbox{symbol}\mid\mbox{string}$
 \\form&$\leftarrow$&
 $\mbox{comment}\mid\mbox{protocol}\mid\mbox{skeleton}$
 \\ comment&$\leftarrow$&
@@ -39,10 +42,13 @@ $(\sym{send}\mbox{ term})\mid(\sym{recv}\mbox{ term})$
 $\mbox{id}\mid(\sym{pubk}\mbox{ id})
 \mid(\sym{privk}\mbox{ id})
 \mid(\sym{invk}\mbox{ id})$
+\\ &$\mid$&$(\sym{pubk}\mbox{ id}\mbox{ string})
+\mid(\sym{privk}\mbox{ id}\mbox{ string})$
 \\ &$\mid$&$(\sym{ltk}\mbox{ id id})\mid\mbox{string}\mid(\sym{cat}\mbox{ term+})$
-\\ &$\mid$&$(\sym{enc}\mbox{ term+ term})$
+\\ &$\mid$&$(\sym{enc}\mbox{ term+ term})\mid(\sym{hash}\mbox{ term+})$
 \\ role-alist&$\leftarrow$&$
 (\sym{non-orig}\mbox{ ht-term}\ast)\mbox{ role-alist}$
+\\ &$\mid$&$(\sym{pen-non-orig}\mbox{ ht-term}\ast)\mbox{ role-alist}$
 \\ &$\mid$&$(\sym{uniq-orig}\mbox{ term}\ast)\mbox{ role-alist}\mid\ldots$
 \\ ht-term&$\leftarrow$&term${}\mid{}$(integer term)
 \\ prot-alist&$\leftarrow$&$\ldots$
@@ -55,6 +61,7 @@ $\mbox{id}\mid(\sym{pubk}\mbox{ id})
 \\ maplet&$\leftarrow$&
 (term term)
 \\ skel-alist&$\leftarrow$&$(\sym{non-orig}\mbox{ term}\ast)\mbox{ skel-alist}$
+\\ &$\mid$&$(\sym{pen-non-orig}\mbox{ term}\ast)\mbox{ skel-alist}$
 \\ &$\mid$&$(\sym{uniq-orig}\mbox{ term}\ast)\mbox{ skel-alist}$
 \\ &$\mid$&$(\sym{precedes}\mbox{ node-pair}\ast)\mbox{ skel-alist}\mid\ldots$
 \\ node-pair&$\leftarrow$&
@@ -69,14 +76,13 @@ $\mbox{id}\mid(\sym{pubk}\mbox{ id})
 The contents of a file can be interpreted as a sequence of
 S-expressions.  The S-expressions used are restricted so that most
 dialects of Lisp can read them, and characters within symbols and
-strings never need quoting.  Seven-bit \textsc{ascii} is used to
-encode characters.  Every list is proper.  An S-expression atom is
-either a \textsc{symbol}, an \textsc{integer}, or a \textsc{string}.
-The characters that make up a symbol are the letters, the digits, and
-the special characters in ``\verb|-*/<;=>;!?:$%_&~^+|''.  A symbol may
-not begin with a digit or a sign followed by a digit.  The characters
-that make up a string are the \textsc{ascii} printing characters
-omitting double quote and backslash.  Double quotes delimit a string.
-A comment\index{comments} begins with a semicolon, or is an
-S-expression list at top-level that starts with the \texttt{comment}
-symbol.
+strings never need quoting.  Every list is proper.  An S-expression
+atom is either a \textsc{symbol}, an \textsc{integer}, or
+a \textsc{string}.  The characters that make up a symbol are the
+letters, the digits, and the special characters in
+``\verb|-*/<=>!?:$%_&~^+|''.  A symbol may not begin with a digit or a
+sign followed by a digit.  The characters that make up a string are
+the printing characters omitting double quote and backslash.  Double
+quotes delimit a string.  A comment\index{comments} begins with a
+semicolon, or is an S-expression list at top-level that starts with
+the \texttt{comment} symbol.

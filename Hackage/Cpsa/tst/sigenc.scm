@@ -1,3 +1,6 @@
+(herald "Signed Encrypted Message Example"
+   (comment "Shows examples of key usage of asymmetric keys"))
+
 (defprotocol mult-keys-sig-enc basic
    (defrole init
     (vars (a b name) (n1 n2 text))

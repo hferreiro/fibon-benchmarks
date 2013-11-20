@@ -1,7 +1,7 @@
-(comment "CPSA 2.1.0")
-(comment "All input read")
+(comment "CPSA 2.3.1")
+(comment "All input read from targetterms6.scm")
 
-(defprotocol tt6 basic
+(defprotocol targetterms6 basic
   (defrole init
     (vars (a name) (n text))
     (trace (send (enc n (pubk a)))
@@ -14,7 +14,7 @@
     (vars (a name) (n text) (m mesg))
     (trace (recv (enc n (pubk a))) (recv m) (send (enc n m (pubk a))))))
 
-(defskeleton tt6
+(defskeleton targetterms6
   (vars (n text) (a name))
   (defstrand init 2 (n n) (a a))
   (non-orig (privk a))
@@ -26,9 +26,10 @@
           (enc n (enc n (pubk a)) (pubk a))))))
   (label 0)
   (unrealized (0 1))
+  (origs (n (0 0)))
   (comment "1 in cohort - 1 not yet seen"))
 
-(defskeleton tt6
+(defskeleton targetterms6
   (vars (m mesg) (n text) (a name))
   (defstrand init 2 (n n) (a a))
   (defstrand trans 3 (m m) (n n) (a a))
@@ -47,7 +48,7 @@
   (unrealized (0 1))
   (comment "1 in cohort - 1 not yet seen"))
 
-(defskeleton tt6
+(defskeleton targetterms6
   (vars (n text) (a name))
   (defstrand init 2 (n n) (a a))
   (defstrand trans 3 (m (enc n (pubk a))) (n n) (a a))
@@ -68,7 +69,7 @@
   (unrealized (0 1))
   (comment "1 in cohort - 1 not yet seen"))
 
-(defskeleton tt6
+(defskeleton targetterms6
   (vars (m mesg) (n text) (a name))
   (defstrand init 2 (n n) (a a))
   (defstrand trans 3 (m (enc n (pubk a))) (n n) (a a))
@@ -91,7 +92,7 @@
   (unrealized (0 1))
   (comment "1 in cohort - 1 not yet seen"))
 
-(defskeleton tt6
+(defskeleton targetterms6
   (vars (n text) (a name))
   (defstrand init 2 (n n) (a a))
   (defstrand trans 3 (m (enc n (pubk a))) (n n) (a a))
@@ -115,9 +116,35 @@
   (label 4)
   (parent 3)
   (unrealized (2 1))
-  (comment "1 in cohort - 1 not yet seen"))
+  (comment "2 in cohort - 2 not yet seen"))
 
-(defskeleton tt6
+(defskeleton targetterms6
+  (vars (n text) (a name))
+  (defstrand init 2 (n n) (a a))
+  (defstrand trans 3 (m (enc n (pubk a))) (n n) (a a))
+  (defstrand trans 3 (m (enc n (enc n (pubk a)) (pubk a))) (n n) (a a))
+  (precedes ((0 0) (1 0)) ((0 0) (2 0)) ((1 2) (2 1)) ((2 2) (0 1)))
+  (non-orig (privk a))
+  (uniq-orig n)
+  (operation nonce-test (displaced 3 1 trans 3) n (2 1)
+    (enc n (pubk a)))
+  (traces
+    ((send (enc n (pubk a)))
+      (recv
+        (cat (enc n (enc n (enc n (pubk a)) (pubk a)) (pubk a))
+          (enc n (enc n (pubk a)) (pubk a)))))
+    ((recv (enc n (pubk a))) (recv (enc n (pubk a)))
+      (send (enc n (enc n (pubk a)) (pubk a))))
+    ((recv (enc n (pubk a))) (recv (enc n (enc n (pubk a)) (pubk a)))
+      (send (enc n (enc n (enc n (pubk a)) (pubk a)) (pubk a)))))
+  (label 5)
+  (parent 4)
+  (unrealized)
+  (shape)
+  (maps ((0) ((a a) (n n))))
+  (origs (n (0 0))))
+
+(defskeleton targetterms6
   (vars (m mesg) (n text) (a name))
   (defstrand init 2 (n n) (a a))
   (defstrand trans 3 (m (enc n (pubk a))) (n n) (a a))
@@ -138,38 +165,42 @@
     ((recv (enc n (pubk a))) (recv (enc n (enc n (pubk a)) (pubk a)))
       (send (enc n (enc n (enc n (pubk a)) (pubk a)) (pubk a))))
     ((recv (enc n (pubk a))) (recv m) (send (enc n m (pubk a)))))
-  (label 5)
+  (label 6)
   (parent 4)
   (unrealized (2 1))
   (comment "1 in cohort - 1 not yet seen"))
 
-(defskeleton tt6
-  (vars (n text) (a name))
+(defskeleton targetterms6
+  (vars (m mesg) (n text) (a name))
   (defstrand init 2 (n n) (a a))
-  (defstrand trans 3 (m (enc n (enc n (pubk a)) (pubk a))) (n n) (a a))
   (defstrand trans 3 (m (enc n (pubk a))) (n n) (a a))
-  (precedes ((0 0) (1 0)) ((0 0) (2 0)) ((1 2) (0 1)) ((2 2) (1 1)))
+  (defstrand trans 3 (m (enc n (enc n (pubk a)) (pubk a))) (n n) (a a))
+  (defstrand trans 3 (m m) (n n) (a a))
+  (precedes ((0 0) (1 0)) ((0 0) (2 0)) ((0 0) (3 0)) ((1 2) (2 1))
+    ((2 2) (0 1)) ((3 2) (2 1)))
   (non-orig (privk a))
   (uniq-orig n)
-  (operation nonce-test (contracted (m (enc n (pubk a)))) n (2 1)
-    (enc n (pubk a)) (enc n (enc n (pubk a)) (pubk a)))
+  (operation nonce-test (displaced 4 1 trans 3) n (2 1) (enc n (pubk a))
+    (enc n m (pubk a)))
   (traces
     ((send (enc n (pubk a)))
       (recv
         (cat (enc n (enc n (enc n (pubk a)) (pubk a)) (pubk a))
           (enc n (enc n (pubk a)) (pubk a)))))
+    ((recv (enc n (pubk a))) (recv (enc n (pubk a)))
+      (send (enc n (enc n (pubk a)) (pubk a))))
     ((recv (enc n (pubk a))) (recv (enc n (enc n (pubk a)) (pubk a)))
       (send (enc n (enc n (enc n (pubk a)) (pubk a)) (pubk a))))
-    ((recv (enc n (pubk a))) (recv (enc n (pubk a)))
-      (send (enc n (enc n (pubk a)) (pubk a)))))
-  (label 6)
-  (parent 5)
+    ((recv (enc n (pubk a))) (recv m) (send (enc n m (pubk a)))))
+  (label 7)
+  (parent 6)
+  (seen 5)
   (unrealized)
-  (shape))
+  (comment "1 in cohort - 0 not yet seen"))
 
 (comment "Nothing left to do")
 
-(defprotocol tt6 basic
+(defprotocol targetterms6 basic
   (defrole init
     (vars (a name) (n text))
     (trace (send (enc n (pubk a)))
@@ -182,7 +213,7 @@
     (vars (a name) (n text) (m mesg))
     (trace (recv (enc n (pubk a))) (recv m) (send (enc n m (pubk a))))))
 
-(defskeleton tt6
+(defskeleton targetterms6
   (vars (n text) (a name))
   (defstrand init 2 (n n) (a a))
   (defstrand trans 3 (m (enc n (pubk a))) (n n) (a a))
@@ -199,8 +230,10 @@
       (send (enc n (enc n (pubk a)) (pubk a))))
     ((recv (enc n (pubk a))) (recv (enc n (enc n (pubk a)) (pubk a)))
       (send (enc n (enc n (enc n (pubk a)) (pubk a)) (pubk a)))))
-  (label 7)
+  (label 8)
   (unrealized)
-  (shape))
+  (shape)
+  (maps ((0 1 2) ((n n) (a a))))
+  (origs (n (0 0))))
 
 (comment "Nothing left to do")

@@ -1,4 +1,4 @@
--- A common entry point for programs based on the CPSA library
+-- Provides a common entry point for programs based on the CPSA library.
 
 -- Copyright (c) 2009 The MITRE Corporation
 --
@@ -6,21 +6,23 @@
 -- modify it under the terms of the BSD License as published by the
 -- University of California.
 
-module CPSA.Lib.Entry (start, usage, abort, success, algOptions,
-                       algInterp, filterOptions, filterInterp,
-                       readSExpr, outputHandle, defaultMargin,
-                       writeSExpr, writeLnSEexpr, cpsaVersion,
-                       comment, writeComment) where
+module CPSA.Lib.Entry (start, usage, abort, success, Options(..),
+                       defaultOptions, algOptions, algInterp,
+                       filterOptions, filterInterp, readSExpr,
+                       gentlyReadSExpr, outputHandle, writeSExpr,
+                       writeLnSEexpr, cpsaVersion, comment,
+                       writeComment, tryIO) where
 
 import Numeric
+import Control.Exception (try)
 import System.IO
-import System.IO.Error
-import Control.Exception as CE
+import System.IO.Error (ioeGetErrorString)
 import System.Environment
 import System.Console.GetOpt
 import System.Exit
 import Data.Version
 import Paths_cpsa
+import qualified CPSA.Basic.Algebra
 import CPSA.Lib.SExpr
 import CPSA.Lib.Printer
 
@@ -31,21 +33,9 @@ start options interp =
     do
       argv <- getArgs
       (flags, files) <- opts options argv
-      output <- interp flags
-      case files of
-        [file] ->               -- Input from named file
-            do
-              input <- openFile file ReadMode
-              p <- posHandle file input
-              return (p, output)
-        [] ->                   -- Input from the standard input
-            do
-              p <- posHandle "" stdin
-              return (p, output)
-        _ ->
-            do
-              msg <- usage options ["too many input files\n"]
-              abort msg
+      opts <- interp flags
+      p <- openInput options files
+      return (p, opts)
 
 opts :: [OptDescr a] -> [String] -> IO ([a], [String])
 opts options argv =
@@ -56,27 +46,56 @@ opts options argv =
             msg <- usage options errs
             abort msg
 
+openInput ::  [OptDescr a] -> [String] -> IO PosHandle
+openInput _ [file] =
+    do                          -- Input from named file
+      input <- openFile file ReadMode
+      posHandle file input
+openInput _ [] =
+    posHandle "" stdin          -- Input from the standard input
+openInput options _ =
+    do
+      msg <- usage options ["too many input files\n"]
+      abort msg
+
 usage :: [OptDescr a] -> [String] -> IO String  -- Return usage string
 usage options errs =
     do
       name <- getProgName
+      datadir <- getDataDir
       let header = "Usage: " ++ name ++ " [OPTIONS] [FILE]"
-      return (concat errs ++ usageInfo header options)
+      let footer = "\nDocumentation directory: " ++ datadir
+      return (concat errs ++ usageInfo header options ++ footer)
 
-readSExpr :: PosHandle -> IO (Maybe (SExpr Pos))
-readSExpr p =
-    do
-      x <- CE.try (load p)
-      case x of
-        Right x ->
-            return x
-        Left err ->
-            abort (ioeGetErrorString err)
+-- CPSA options and default values
 
--- Options set up for simple filters:
+data Options = Options {
+      optFile :: Maybe FilePath, -- Nothing specifies standard output
+      optAlg :: String,          -- Name of the algebra
+      optAnalyze :: Bool,        -- False when only expanding macros
+      optNoIsoChk :: Bool, -- True when not performing isomorphism checks
+      optCheckNoncesFirst :: Bool, -- True when checking nonces first
+      optTryOldStrandsFirst :: Bool, -- True when visiting old strands first
+      optTryYoungNodesFirst :: Bool, -- True when visiting young nodes first
+      optLimit :: Int,          -- Step count limit
+      optBound :: Int,          -- Strand cound bound
+      optMargin :: Int,         -- Output line length
+      optIndent :: Int }        -- Pretty printing indent
+    deriving Show
 
-defaultMargin :: Int
-defaultMargin = 72
+defaultOptions :: Options
+defaultOptions = Options {
+  optFile = Nothing,
+  optAlg = CPSA.Basic.Algebra.name,
+  optAnalyze = True,
+  optNoIsoChk = False,
+  optCheckNoncesFirst = False,
+  optTryOldStrandsFirst = False,
+  optTryYoungNodesFirst = False,
+  optLimit = 2000,
+  optBound = 8,
+  optMargin = 72,
+  optIndent = 2 }
 
 -- Command line option flags
 data Flag
@@ -92,7 +111,7 @@ algOptions :: String -> [OptDescr Flag]
 algOptions defaultAlgebra =
     [ Option ['o'] ["output"]  (ReqArg Output "FILE")  "output FILE",
       Option ['m'] ["margin"]  (ReqArg Margin "INT")
-      ("set output margin (default " ++ show defaultMargin ++ ")"),
+      ("set output margin (default " ++ show (optMargin defaultOptions) ++ ")"),
       Option ['a'] ["algebra"]  (ReqArg Algebra "STRING")
       ("algebra (default " ++ defaultAlgebra ++ ")"),
       Option ['s'] ["show-algebras"] (NoArg Algebras)  "show algebras",
@@ -108,7 +127,8 @@ data Params = Params
 -- Interpret option flags
 algInterp :: String -> [String] -> [Flag] -> IO (Maybe FilePath, String, Int)
 algInterp alg algs flags =
-    loop flags (Params { file = Nothing, alg = alg, margin = defaultMargin })
+    loop flags (Params { file = Nothing, alg = alg,
+                         margin = optMargin defaultOptions })
     where
       loop [] (Params { file = file, alg = alg, margin = margin}) =
           return (file, alg, margin)
@@ -144,14 +164,14 @@ filterOptions :: [OptDescr Flag]
 filterOptions =
     [ Option ['o'] ["output"]  (ReqArg Output "FILE")  "output FILE",
       Option ['m'] ["margin"]  (ReqArg Margin "INT")
-      ("set output margin (default " ++ show defaultMargin ++ ")"),
+      ("set output margin (default " ++ show (optMargin defaultOptions) ++ ")"),
       Option ['h'] ["help"]    (NoArg Help)          "show help message",
       Option ['v'] ["version"] (NoArg Info)          "show version number" ]
 
 -- Interpret option flags
 filterInterp :: [Flag] -> IO (Maybe FilePath, Int)
 filterInterp flags =
-    loop flags Nothing defaultMargin
+    loop flags Nothing (optMargin defaultOptions)
     where
       loop [] file margin =
           return (file, margin)
@@ -197,7 +217,7 @@ success msg =
 
 -- S-expression pretty print parameters
 indent :: Int
-indent = 2
+indent = optIndent defaultOptions
 
 writeSExpr :: Handle -> Int -> SExpr a -> IO ()
 writeSExpr h margin sexpr =
@@ -219,3 +239,39 @@ comment msg =
 writeComment :: Handle -> Int -> String -> IO ()
 writeComment h margin msg =
     writeSExpr h margin (comment msg)
+
+-- Read an S-expression, and fail on error
+readSExpr :: PosHandle -> IO (Maybe (SExpr Pos))
+readSExpr p =
+    do
+      x <- tryIO (load p)
+      case x of
+        Right x ->
+            return x
+        Left err ->
+            abort err
+
+-- Read an S-expression, and gently fail on error by printing the
+-- error message to standard error and returning EOF.
+gentlyReadSExpr :: PosHandle -> IO (Maybe (SExpr Pos))
+gentlyReadSExpr p =
+    do
+      x <- tryIO (load p)
+      case x of
+        Right x ->
+            return x
+        Left err ->
+            do
+              hPutStrLn stderr (show err)
+              return Nothing
+
+-- Exception handling for IO errors
+tryIO :: IO a -> IO (Either String a)
+tryIO x =
+    do
+      y <- try x
+      case y of
+        Right x ->
+            return (Right x)
+        Left err ->
+            return (Left (ioeGetErrorString err))

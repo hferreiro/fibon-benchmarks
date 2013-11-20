@@ -1,4 +1,4 @@
--- Defines the interface to CPSA algebras
+-- Defines the interface to CPSA algebras.
 
 -- Copyright (c) 2009 The MITRE Corporation
 --
@@ -27,6 +27,7 @@ class (Term t, Place t p, Gen t g, Subst t g s,
 
 class (Ord t, Show t) => Term t where
     isVar :: t -> Bool          -- Is term a variable in the algebra?
+    isMesgVar :: t -> Bool      -- Is term a variable of sort mesg?
     isAtom :: t -> Bool       -- Is the sort of this term a base sort?
 
     -- Does a term occur in another term?
@@ -65,10 +66,10 @@ class (Ord t, Show t) => Term t where
     buildable :: Set t -> Set t -> t -> Bool
 
     -- encryptions term returns a list of encryptions carried by the
-    -- term, each with the key used to prepare it, with duplicates
+    -- term, each with the keys used to prepare it, with duplicates
     -- eliminated.  Encryptions that occur in other encryption are
     -- later in the list.
-    encryptions :: t -> [(t,t)]
+    encryptions :: t -> [(t,[t])]
 
     -- protectors derivable target source returns Nothing if target is
     -- carried by the source outside of an encryption, where derivable
@@ -110,8 +111,10 @@ class (Term t, Show p) => Place t p | t -> p, p -> t where
     -- carriedPlaces target source returns a list of places at which
     -- the target is carried in the term.
     carriedPlaces :: t -> t -> [p]
-    -- replace variable place source returns the term that results from
-    -- replacing the variable at the give place in the source term.
+    -- replace variable place source returns the term that results
+    -- from replacing the variable at the give place in the source
+    -- term.  The sort of the variable must match the one used to
+    -- create the place.
     replace :: t -> p -> t -> t
     -- ancestors source place extracts the terms in the source that
     -- contain the term at the given place.
@@ -141,10 +144,8 @@ class (Term t, Show g) => Gen t g | t -> g, g -> t where
 class (Term t, Gen t g, Ord s, Show s) => Subst t g s | t -> s, s -> t where
     emptySubst :: s
     substitute :: s -> t -> t
-    unify :: t -> t -> (g, s) -> Maybe (g, s)
+    unify :: t -> t -> (g, s) -> [(g, s)]
     compose :: s -> s -> s
-    moreGeneral :: (g, s) -> (g, s) -> Bool  -- more general than relation
-    -- (g0, s0) `moreGeneral` (g1, s1) if s1 = compose s2 s0 for some s2
 
 -- Environments
 
@@ -155,10 +156,12 @@ class (Term t, Gen t g, Subst t g s, Ord e, Show e) => Env t g s e
     | t -> e, e -> t where
     emptyEnv :: e
     instantiate :: e -> t -> t
-    match :: t -> t -> (g, e) -> Maybe (g, e)
-    -- Can environment be refined so it is idempotent when applied to
-    -- some terms?
-    idempotentEnvFor :: (g, e) -> [t] -> Maybe (g, e)
+    match :: t -> t -> (g, e) -> [(g, e)]
+    -- Can environment be refined so it is the identity when applied
+    -- to some terms?
+    identityEnvFor :: (g, e) -> [t] -> [(g, e)]
+    -- specialize an environment by eliminating generated variables.
+    specialize :: e -> e
     -- Cast an environment into a substitution
     substitution :: e -> s
     -- Provide a concrete representation of an environment as an
@@ -177,6 +180,7 @@ class (Term t, Gen t g, Subst t g s, Env t g s e, Show c) => Context t g s e c
     addToContext :: c -> [t] -> c -- Add to context from some terms
     displayVars :: c -> [t] -> [SExpr ()]
     displayTerm :: c -> t -> SExpr ()
+    displayEnv :: c -> c -> e -> [SExpr ()]
     -- A substitution display routine is required due to the fact that
     -- the sort of some variables in the substitition might not be
     -- known.  For the purposes of displaying the substitition, enough

@@ -1,4 +1,5 @@
-;;; The ffgg  Protocol
+(herald "The ffgg Protocol"
+	(comment "From A Necessarily Parallel Attack by Jon K. Millen"))
 
 (defprotocol ffgg basic
   (defrole init (vars (a b name) (n1 n2 m x y text))

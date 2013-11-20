@@ -15,8 +15,8 @@ import CPSA.Graph.Config
 -- Show a coordinate as a length
 
 showsL :: Float -> ShowS
-showsL len s =
-    N.showFFloat (Just 3) len s
+showsL len =
+    N.showFFloat (Just 3) len
 
 showL :: Float -> String
 showL len = showsL len []
@@ -36,7 +36,7 @@ shorten d x1 y1 x2 y2 =
 -- Tooltip
 tooltip :: String -> [Element] -> Element
 tooltip tip content =
-    ec "a" [("xlink:title", tip)] content
+    ec "g" [] (mc "title" [] tip:content)
 
 -- Centered text
 text :: Config -> Float -> Float -> String -> Element
@@ -46,13 +46,15 @@ text _ x y content =
       style = props [("text-anchor", "middle")]
 
 -- Circle with radius from configuration
-circ :: Config -> Bool -> Float -> Float -> Element
+circ :: Config -> Maybe String -> Float -> Float -> Element
 circ conf color x y =
-    ec "circle" attrs []
+    ec "circle" (style ++ dims) []
     where
       dims = [("cx", showL x), ("cy", showL y), ("r", showL (br conf))]
-      style = ("style", props [("fill", "red")])
-      attrs = if color then (style : dims) else dims
+      style =
+          case color of
+            Nothing -> []
+            Just color -> [("style", props [("fill", color)])]
 
 rect :: Config -> Float -> Float -> Float -> Float -> Element
 rect conf x y w h =
@@ -97,6 +99,7 @@ arrow conf solid x1 y1 x3 y3 =
 
 data ButtonKind
     = AliveTree                 -- tree node is alive
+    | Shape                     -- tree node is alive and is a shape
     | AliveDup                  -- duplicate node is alive
     | DeadTree                  -- tree node is dead
     | DeadDup                   -- duplication node is dead
@@ -110,10 +113,12 @@ kbutton conf x y kind label =
                ("onclick", onclick conf label)]
       style = italic kind [("text-anchor", "middle"), ("fill", color kind)]
       color AliveTree = "black"
+      color Shape = "blue"
       color AliveDup = "green"
       color DeadTree = "red"
       color DeadDup = "orange"
       italic AliveTree props = props
+      italic Shape props = props
       italic AliveDup props = ("font-style", "italic"):props
       italic DeadTree props = props
       italic DeadDup props = ("font-style", "italic"):props
@@ -121,9 +126,9 @@ kbutton conf x y kind label =
 onclick :: Config -> Int -> String
 onclick conf label =
     if compact conf then
-        showString "showk(evt, \"k" $ shows label "\")"
+        showString "showk(evt, \"" $ kid $ shows label "\")"
     else
-        showString "window.open(\"#i" $ shows label "\", \"_self\")"
+        showString "window.open(\"#" $ kid $ shows label "\", \"_self\")"
 
 -- A button that displays a tree and its first preskeleton
 tbutton :: Config -> Float -> Float -> Int -> Element
@@ -133,9 +138,17 @@ tbutton _ x y label =
       attrs = [("x", showL x), ("y", showL y),
                ("style", style), ("onclick", script)]
       style = props [("text-anchor", "middle")]
-      script = showString "showt(evt, \"t" $ content $
-               showString "\", \"k" $ content "\")"
+      script = showString "showt(evt, \"" $ tid $ content $
+               showString "\", \"" $ kid $ content "\")"
       content = shows label
+
+-- Tree identifier
+tid :: ShowS
+tid = showChar 't'
+
+-- Skeleton identifier
+kid :: ShowS
+kid = showChar 'k'
 
 -- The script for the buttons
 ecmascript :: String

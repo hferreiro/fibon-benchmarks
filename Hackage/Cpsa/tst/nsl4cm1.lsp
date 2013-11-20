@@ -1,3 +1,5 @@
+(herald "Four Party Needham-Schroeder-Lowe Protocol")
+
 (defprotocol nsl4cm basic
    (defrole init
       (vars (a b c d name) (na nb nc nd text))

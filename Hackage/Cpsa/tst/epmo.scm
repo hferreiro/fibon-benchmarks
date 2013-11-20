@@ -1,5 +1,5 @@
-;;; Electronic Purchase with Money Order protocol annotated with trust
-;;; management formulas.
+(herald "Electronic Purchase with Money Order Protocol"
+  (comment "Annotated with trust management formulas"))
 
 (defprotocol epmo basic
   (defrole bank
@@ -32,17 +32,17 @@
     (non-orig (invk hash))
     (uniq-orig nc)
     (annotations c
-      (2
+      (1
         (says m
           (forall ((pb name))
             (implies (transfer pb price m nm) (ship m goods c)))))
-      (4
+      (3
         (says b
           (implies
             (and (forall ((pm name)) (says c (transfer b price pm nm)))
               (forall ((pm name)) (says m (transfer b price pm nm))))
-            (transfer b price pm nm))))
-      (5 (transfer b price m nm))))
+            (transfer b price m nm))))
+      (4 (transfer b price m nm))))
   (defrole merchant
     (vars (b c m name) (hash akey) (nb nc nm data) (goods price text))
     (trace
@@ -53,19 +53,19 @@
     (non-orig (invk hash))
     (uniq-orig nm)
     (annotations m
-      (2
+      (1
         (forall ((pb name))
           (implies (transfer pb price m nm) (ship m goods c))))
-      (3
+      (2
         (and
           (says b
             (implies
               (and
                 (forall ((pm name)) (says c (transfer b price pm nm)))
                 (forall ((pm name)) (says m (transfer b price pm nm))))
-              (transfer b price pm nm)))
+              (transfer b price m nm)))
           (says c (transfer b price m nm))))
-      (4 (and (transfer b price m nm) (ship m goods c))))))
+      (3 (and (transfer b price m nm) (ship m goods c))))))
 
 (defskeleton epmo (vars (b c m name))
   (defstrand customer 5 (b b) (c c) (m m))

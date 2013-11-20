@@ -1,4 +1,4 @@
--- A CPSA specific pretty printer
+-- A CPSA specific pretty printer using S-expressions.
 
 -- Copyright (c) 2009 The MITRE Corporation
 --
@@ -34,6 +34,8 @@ pretty indent (L _ (x@(S _ "defprotocol") : xs)) =
       loop es (x@(L _ (S _ "defrole": _)):xs) =
           loop (group indent x : brk 1 : es) xs
       loop es (x@(L _ _):xs) = loop (block indent x : brk 1 : es) xs
+pretty indent x@(L _ (S _ "defmacro" : _)) = block indent x
+pretty indent x@(L _ (S _ "herald" : _)) = block indent x
 pretty indent x = group indent x
 
 group :: Printer a

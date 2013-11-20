@@ -23,40 +23,37 @@ import CPSA.Lib.CPSA
 -- variable bound by a forall or exists quantifier is freshly
 -- generated.
 
-data Algebra t p g s e c => Formula t p g s e c
-    = Predicate String [FTerm t p g s e c]
-    | Not (Formula t p g s e c)
-    | And [Formula t p g s e c]
-    | Or [Formula t p g s e c]
-    | Implies [Formula t p g s e c] -- Null list not allowed
-    | Says t (Formula t p g s e c)
-    | Forall [t] (Formula t p g s e c)
-    | Exists [t] (Formula t p g s e c)
+data Formula t
+    = Predicate String [FTerm t]
+    | Not (Formula t)
+    | And [Formula t]
+    | Or [Formula t]
+    | Implies [Formula t] -- Null list not allowed
+    | Says t (Formula t)
+    | Forall [t] (Formula t)
+    | Exists [t] (Formula t)
       deriving (Eq, Show)
 
 -- A formula term is an algebra term or an application of a function
 -- symbol to list of formula terms.
 
-data Algebra t p g s e c => FTerm t p g s e c
+data FTerm t
     = AlgTerm t
-    | Application String [FTerm t p g s e c]
+    | Application String [FTerm t]
       deriving (Eq, Show)
 
-true :: Algebra t p g s e c => Formula t p g s e c
+true :: Formula t
 true = And []
 
-truth :: Algebra t p g s e c => Formula t p g s e c -> Bool
+truth :: Eq t => Formula t -> Bool
 truth f = f == true
 
-says :: Algebra t p g s e c => t -> Formula t p g s e c ->
-        Formula t p g s e c
+says :: Eq t => t -> Formula t -> Formula t
 says t f
     | truth f = true
     | otherwise = Says t f
 
-implies :: Algebra t p g s e c => [Formula t p g s e c] ->
-           Formula t p g s e c -> Formula t p g s e c
-
+implies :: Eq t => [Formula t] -> Formula t -> Formula t
 implies antecedents consequence
     | truth consequence = true
     | null simp = consequence
@@ -66,11 +63,10 @@ implies antecedents consequence
 
 -- Free variables in a formula
 
-freeVars :: Algebra t p g s e c => Formula t p g s e c -> S.Set t
+freeVars :: Algebra t p g s e c => Formula t -> S.Set t
 freeVars f = freeVarsForm S.empty f
 
-freeVarsForm :: Algebra t p g s e c => S.Set t ->
-                Formula t p g s e c -> S.Set t
+freeVarsForm :: Algebra t p g s e c => S.Set t -> Formula t -> S.Set t
 freeVarsForm s (Predicate _ ts) = foldl freeVarsFTerm s ts
 freeVarsForm s (Not f) = freeVarsForm s f
 freeVarsForm s (And fs) = foldl freeVarsForm s fs
@@ -80,8 +76,7 @@ freeVarsForm s (Says t f) = freeVarsForm (freeVarsTerm s t) f
 freeVarsForm s (Forall ts f) = foldl (flip S.delete) (freeVarsForm s f) ts
 freeVarsForm s (Exists ts f) = foldl (flip S.delete) (freeVarsForm s f) ts
 
-freeVarsFTerm :: Algebra t p g s e c => S.Set t ->
-                 FTerm t p g s e c -> S.Set t
+freeVarsFTerm :: Algebra t p g s e c => S.Set t -> FTerm t -> S.Set t
 freeVarsFTerm s (AlgTerm t) = freeVarsTerm s t
 freeVarsFTerm s (Application _ ts) = foldl freeVarsFTerm s ts
 
@@ -93,8 +88,7 @@ freeVarsTerm s t = foldVars (flip S.insert) s t
 -- The implementations assumes the environment maps no bound
 -- variables.
 
-finstantiate :: Algebra t p g s e c => e ->
-                Formula t p g s e c -> Formula t p g s e c
+finstantiate :: Algebra t p g s e c => e -> Formula t -> Formula t
 finstantiate env (Predicate sym ts) =
     Predicate sym (map (tinstantiate env) ts)
 finstantiate env (Not f) =
@@ -112,8 +106,7 @@ finstantiate env (Forall ts f) =
 finstantiate env (Exists ts f) =
     Exists ts (finstantiate env f)
 
-tinstantiate :: Algebra t p g s e c => e ->
-                FTerm t p g s e c -> FTerm t p g s e c
+tinstantiate :: Algebra t p g s e c => e -> FTerm t -> FTerm t
 tinstantiate env (AlgTerm t) =
     AlgTerm (instantiate env t)
 tinstantiate env (Application sym ts) =
@@ -143,7 +136,7 @@ keywords = ["forall", "exists", "says", "not",
 -- once, and no free variable is bound within a formula.  Use
 -- loadDecls to ensure vars are not keywords.
 loadFormula :: (Algebra t p g s e c, Monad m) => [t] -> g ->
-               SExpr Pos -> m (g, Formula t p g s e c)
+               SExpr Pos -> m (g, Formula t)
 loadFormula vars gen (L _ (S _ pred : xs)) -- Atomic formula
     | notElem pred keywords =
         do
@@ -217,7 +210,7 @@ RightS r >>= k ==> k r
 -}
 
 loadFTerms :: (Algebra t p g s e c, Monad m) => [t] ->
-              [SExpr Pos] -> m [FTerm t p g s e c]
+              [SExpr Pos] -> m [FTerm t]
 loadFTerms vars xs =
     foldM f [] (reverse xs)
     where
@@ -228,7 +221,7 @@ loadFTerms vars xs =
 
 -- Load a formula term
 loadFTerm :: Algebra t p g s e c => [t] -> SExpr Pos ->
-             EitherS (FTerm t p g s e c)
+             EitherS (FTerm t)
 loadFTerm vars x =
     case loadTerm vars x of
       RightS t -> return (AlgTerm t)
@@ -258,9 +251,9 @@ mapAccumLM f z (x : xs) =
 -- reverse order, so list append is the correct way to extend the list
 -- of variables that are in scope.
 loadQuantified :: (Algebra t p g s e c, Monad m) =>
-                  ([t] -> Formula t p g s e c -> Formula t p g s e c) ->
+                  ([t] -> Formula t -> Formula t) ->
                   [t] -> g -> [SExpr Pos] -> SExpr Pos ->
-                  m (g, Formula t p g s e c)
+                  m (g, Formula t)
 loadQuantified build vars gen decls body =
     do
       (gen', vars') <- loadDecls gen decls
@@ -283,7 +276,7 @@ checkDecl _ = return ()
 
 -- Display a formula
 displayFormula :: Algebra t p g s e c => [t] ->
-                  Formula t p g s e c -> SExpr ()
+                  Formula t -> SExpr ()
 displayFormula vars form =
     displayForm ctx' form
     where                       -- Add quantified vars last so they are
@@ -291,8 +284,7 @@ displayFormula vars form =
       ctx' = addToContext ctx (quantified form)
 
 -- Collect the quantified variables
-quantified :: Algebra t p g s e c =>
-              Formula t p g s e c -> [t]
+quantified :: Algebra t p g s e c => Formula t -> [t]
 quantified (Predicate _ _) = []
 quantified (Not f) = quantified f
 quantified (And fs) = concatMap quantified fs
@@ -302,8 +294,7 @@ quantified (Says _ f) = quantified f
 quantified (Forall ts f) = ts ++ quantified f
 quantified (Exists ts f) = ts ++ quantified f
 
-displayForm :: Algebra t p g s e c => c ->
-               Formula t p g s e c -> SExpr ()
+displayForm :: Algebra t p g s e c => c -> Formula t -> SExpr ()
 displayForm ctx (Predicate sym ts) =
     L () (S () sym : map (displayFTerm ctx) ts)
 displayForm ctx (Not f) =
@@ -321,8 +312,7 @@ displayForm ctx (Forall ts f) =
 displayForm ctx (Exists ts f) =
     L () [S () "exists", L () (displayVars ctx ts), displayForm ctx f]
 
-displayFTerm :: Algebra t p g s e c => c ->
-                FTerm t p g s e c -> SExpr ()
+displayFTerm :: Algebra t p g s e c => c -> FTerm t -> SExpr ()
 displayFTerm ctx (AlgTerm t) =
     displayTerm ctx t
 displayFTerm ctx (Application sym ts) =

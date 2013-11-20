@@ -1,4 +1,4 @@
-;; Kelly's 64-shape protocol
+(herald "Kelly's 64-shape protocol" (bound 10))
 
 (defprotocol kelly64 basic
   (defrole client

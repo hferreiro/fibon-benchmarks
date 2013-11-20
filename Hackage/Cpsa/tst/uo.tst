@@ -1,5 +1,5 @@
-(comment "CPSA 2.1.0")
-(comment "All input read")
+(comment "CPSA 2.3.1")
+(comment "All input read from uo.scm")
 
 (defprotocol uniq-orig basic
   (defrole init (vars (n text)) (trace (send n)) (uniq-orig n))
@@ -12,7 +12,9 @@
   (uniq-orig n)
   (traces ((send n)) ((send (enc m n)) (recv n)))
   (label 0)
-  (unrealized (1 1)))
+  (unrealized (1 1))
+  (preskeleton)
+  (comment "Not a skeleton"))
 
 (defskeleton uniq-orig
   (vars (n m text))
@@ -24,6 +26,8 @@
   (label 1)
   (parent 0)
   (unrealized)
-  (shape))
+  (shape)
+  (maps ((0 1) ((n n) (m m))))
+  (origs (n (0 0))))
 
 (comment "Nothing left to do")

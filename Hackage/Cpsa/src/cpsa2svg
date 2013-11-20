@@ -1,8 +1,8 @@
 #! /bin/sh
 
-# Generates an SVG diagram from CPSA preskeletons
+# Generates an SVG diagram from CPSA skeletons
 
-# This program converts the preskeletons in the input into an SVG
+# This program converts the skeletons in the input into an SVG
 # diagram using Scheme and the GraphVis program dot.  Terms are
 # displayed as tooltips in the diagram.
 
@@ -51,7 +51,7 @@ do
 done
 
 SCRIPT='
-;;; Converts the preskeletons in the input into GraphViz dot format.
+;;; Converts the skeletons in the input into GraphViz dot format.
 ;;; Terms are displayed as tooltips, so this output is usually
 ;;; converted to SVG.
 
@@ -66,7 +66,7 @@ SCRIPT='
   (let ((input (get)))			 ; Read input
     (show-all (car input) (cdr input)))) ; Process in
 
-;;; Get the list of preskeletons and the protocols as an alist
+;;; Get the list of skeletons and the protocols as an alist
 (define (get)
   (let loop ((prots '\''()) (skels '\''()))
     (let ((x (read)))

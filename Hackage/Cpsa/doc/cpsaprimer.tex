@@ -1,7 +1,6 @@
 \documentclass[12pt]{article}
 \usepackage{amssymb}
 \usepackage{amsmath}
-\usepackage{amsthm}
 \usepackage{url}
 \usepackage{graphicx}
 \usepackage{makeidx}
@@ -11,11 +10,22 @@
 \makeindex
 
 \title{CPSA Primer}
-\author{John D.~Ramsdell\qquad Joshua D.~Guttman\\ The MITRE Corporation}
+\author{John D.~Ramsdell\qquad Joshua D.~Guttman\\
+  The MITRE Corporation\\ CPSA Version \version}
 
 \begin{document}
 \maketitle
 \cpsacopying
+
+\tableofcontents
+
+\listoffigures
+
+\listoftables
+
+\newpage
+
+\section{Introduction}
 
 \begin{sloppypar}
 Analyzing a cryptographic protocol means finding out what security
@@ -27,16 +37,6 @@ participants into an unexpected execution, breaking a secrecy or
 authentication property that the protocol was intended to ensure.
 \end{sloppypar}
 
-% Until bugs are fixed, comment this out:
-\iffalse
-{\cpsa}, The Cryptographic Protocol Shapes Analyzer, is a software
-tool.  Given a protocol definition and some assumptions about
-executions, it produces descriptions of all possible executions of the
-protocol compatible with the assumptions.  Naturally, there are
-infinitely many possible executions of a useful protocol, since
-different participants can run it with varying parameters, and the
-participants can run it repeatedly.
-\else
 {\cpsa}, The Cryptographic Protocol Shapes Analyzer, is a software
 tool.  Given a protocol definition and some assumptions about
 executions, it attempts to produce descriptions of all possible
@@ -44,7 +44,6 @@ executions of the protocol compatible with the assumptions.
 Naturally, there are infinitely many possible executions of a useful
 protocol, since different participants can run it with varying
 parameters, and the participants can run it repeatedly.
-\fi
 
 However, for many naturally occurring protocols, there are only
 finitely many of these runs that are essentially different.  Indeed,
@@ -68,13 +67,16 @@ problem is to see what possible executions exist from that
 participant's ``point of view.''  The analysis reveals what the other
 participants must have done, given the first participant's view.
 
-% When bugs are fixed, fix this too.
 The shapes analysis is performed within a pure Dolev-Yao
 model~\cite{DolevYao83}.  {\cpsa}'s search is based on a high-level
-algorithm shown to be complete, i.e.\@ every shape can in fact be
-found in a finite number of steps~\cite{DoghmiGuttmanThayer07}.
-{\cpsa}'s search has not been shown to be complete, a deficiency we
-are committed to repair.
+algorithm that was claimed to be complete, i.e.\@ every shape can in
+fact be found in a finite number of
+steps~\cite{DoghmiGuttmanThayer07,Guttman11}.  Further theoretical
+work showed classes of executions that are not found by the algorithm,
+however it also showed that every omitted execution requires an
+unnatural interpretation of a protocol's roles.  Hence the algorithm
+is complete relative to natural role semantics.
+Appendix~\ref{sec:omitted executions} discusses omitted executions.
 
 \section{Overview}
 
@@ -108,7 +110,7 @@ program, and look only at the computed shapes associated with each
 problem statement.
 
 The \texttt{cpsagraph} program is applied to the output to produce a
-more readable, hyperlinked \textsc{xml} document that can be displayed
+more readable, hyperlinked \textsc{xhtml} document that can be displayed
 in a standards-compliant web browser.  The {\cpsa} User Guide contains
 the up-to-date description of \texttt{cpsagraph} generated documents.
 The guide is also the place to find command-line usage information for
@@ -119,11 +121,24 @@ The \texttt{cpsa} program uses S-expressions for both input and
 output.  S-expression is an abbreviation for a Symbolic Expression of
 Lisp fame, and is described in Appendix~\ref{sec:syntax reference}.
 
-The input consists of two forms: protocol definitions and initial
-behavior descriptions.  The exact details of both forms depend on the
-message algebra specified by the protocol.  Protocols that specify
-\texttt{basic} as their algebra get an implementation of the Basic
-Crypto Algebra~(\textsc{bca}) described in the next section.  A
+The input may optionally start with a \texttt{herald} form.  The form
+contains a title for the run and an association list.  The association
+list allows options normally specified on the command line to be
+specified within an input file.  In the following example, the herald
+form specifies a strand bound of 12 in a way that is equivalent to the
+command line option \texttt{--bound=12}.
+
+\begin{quote}
+\begin{verbatim}
+(herald Needham-Schroeder (bound 12))
+\end{verbatim}
+\end{quote}
+
+The body of the input consists of two forms: protocol definitions and
+initial behavior descriptions.  The exact details of both forms depend
+on the message algebra specified by the protocol.  Protocols that
+specify \texttt{basic} as their algebra get an implementation of the
+Basic Crypto Algebra~(\textsc{bca}) described in the next section.  A
 complete grammar for \texttt{cpsa} input with \textsc{bca} protocols
 is displayed in Table~\ref{tab:syntax} on Page~\pageref{tab:syntax}.
 
@@ -179,22 +194,27 @@ be replaced by the traditional notation for terms.  Thus
 \texttt{(invk~k)} will be written as $K^{-1}$, and \texttt{(pubk~n)}
 as $K_{N}$.
 
-The terms in this algebra are freely generated from the atoms,
-tags, encryption, and concatenation.  A tag is a quoted constant.
+The terms in this algebra are freely generated from the atoms, tags,
+concatenation, encryption, and hashing.  A tag is a quoted constant.
+The concatenation of terms~$t$ and~$t'$ is~$t,t'$ in traditional infix
+notation and \texttt{(cat $t$ $t'$)} in S-expression syntax.  The
+comma operator is right associative and \texttt{(cat $a$ $b$ $c$ $d$)}
+is equivalent to \texttt{(cat $a$ (cat $b$ (cat $c$ $d$)))}.
 Given~$t$, the term to be protected, and key term~$k$, the encryption
 of~$t$ using~$k$ is~$\enc{t}{k}$ in traditional notation and
 \texttt{(enc $t$ $k$)} in S-expression syntax.  The term represents
 asymmetric encryption when the key is of sort \dom{akey}, otherwise it
-represents symmetric encryption.  The concatenation of terms~$t$
-and~$t'$ is~$t,t'$ in traditional infix notation and \texttt{(cat $t$
-  $t'$)} in S-expression syntax.  The comma operator is right
-associative and \texttt{(cat $a$ $b$ $c$ $d$)} is equivalent to
-\texttt{(cat $a$ (cat $b$ (cat $c$ $d$)))}.  Finally, \texttt{(enc $a$
-  $b$ $c$ $d$ $k$)} is equivalent to \texttt{(enc (cat $a$ $b$ $c$
-  $d$) $k$)}.  Figure~\ref{fig:ns responder} on Page~\pageref{fig:ns
-  responder} contains examples of \textsc{bca} message terms.  Also
-see \textsc{term} in Table~\ref{tab:syntax}, Appendix~\ref{sec:syntax
-  reference}.
+represents symmetric encryption.  Additionally, \texttt{(enc $a$ $b$
+  $c$ $d$ $k$)} is equivalent to \texttt{(enc (cat $a$ $b$ $c$ $d$)
+  $k$)}.  Given~$t$, the term to be hashed, its hash is $\hash{t}$ in
+traditional notation and \texttt{(hash $t$)} in S-expression syntax.
+{\cpsa} treats a hashed term as if it were an encryption in which the
+term that is hashed is the encryption key.  As with encryption,
+\texttt{(hash $a$ $b$ $c$ $d$)} is equivalent to \texttt{hash (cat $a$
+  $b$ $c$ $d$))}.  Figure~\ref{fig:ns responder} on
+Page~\pageref{fig:ns responder} contains examples of \textsc{bca}
+message terms.  Also see \textsc{term} in Table~\ref{tab:syntax},
+Appendix~\ref{sec:syntax reference}.
 
 A message term \emph{carries}\index{carries} a subterm of the message
 if the possession of the right set of keys allows the extraction of
@@ -281,17 +301,20 @@ carried is an outbound term.  A term is
 \emph{acquired}\index{acquired} by a trace if it first occurs in an
 inbound term and is also carried by that term.
 
-Some atoms in a role have special properties.  An atom may be
-declared to be non-originating with the \texttt{non-orig} form and
-uniquely originating with the \texttt{uniq-orig} form.  The
-declarations make assertions about instances of a role, assertions
-that will be defined after role instantiation is explained.
+Some atoms in a role have special properties.  An atom may be declared
+to be non-originating with the \texttt{non-orig} form or the
+\texttt{pen-non-orig} form and uniquely originating with the
+\texttt{uniq-orig} form.  The declarations make assertions about
+instances of a role, assertions that will be defined after role
+instantiation is explained.
 
 Every variable that occurs in each term declared to be non-originating
 must occur in some term in the trace, and the term must not be carried
-by any term in the trace.  Each term declared to be
-uniquely originating must originate in the trace.  Each variable of
-sort \fn{mesg} must be acquired in the trace.
+by any term in the trace.  Every variable that occurs in each term
+declared to be penetrator non-originating must occur in some term in
+the trace, but the term may be carried by some term in a trace.  Each
+term declared to be uniquely originating must originate in the trace.
+Each variable of sort \fn{mesg} must be acquired in the trace.
 
 \section{Executions}
 
@@ -360,12 +383,10 @@ instances, and the edges include the ones in the relation.
 Additionally, the following strand succession edges\index{strand
   succession edges} are included: $$\{((s,p), (s, p+1))\mid s<|i|,
 p+1<\cn{height}(i(s))\}.$$ Executions with cyclic graphs are omitted
-from consideration, because they violate causality.  Relation~$R$ on
-set~$S$ is \emph{asymmetric}\index{asymmetric relation} iff
-$x\mathbin{R}y$ implies not $y\mathbin{R}x$ for all distinct $x,y \in
-S$.  The transitive asymmetric relation~$\prec$ is the transitive
-closure of the graph's edges, and $n_0\prec n_1$ asserts that the
-message event at~$n_0$ precedes the one at~$n_1$.
+from consideration, because they violate causality.  The transitive
+irreflexive~$\prec$ is the transitive closure of the graph's edges,
+and $n_0\prec n_1$ asserts that the message event at~$n_0$ precedes
+the one at~$n_1$.
 
 The node relation of an execution satisfies one additional property.
 For each reception node in its sequence, there exists a unique
@@ -432,6 +453,10 @@ that is carried by no message, and it or its inverse is the key of an
 encryption in some message.  Each non-originating term is a key that
 is not compromised, as the penetrator has no access to the key.
 
+A \index{penetrator non-origination}\emph{penetrator non-originating
+  term} is an atom that is forbidden from being originated on a
+penetrator strand in an execution.
+
 A \index{unique origination}\emph{uniquely originating term} is an
 atom that originates on exactly one strand in the execution.  The
 correct behavior of some protocols depends on the fact that its
@@ -451,9 +476,10 @@ one that must not be carried by any message term in the execution.
 The mapping of a non-originating role term can be conditioned on the
 height of the instance.  A role non-origination assumption of the form
 \texttt{(3 a)} asserts that \texttt{a} will not be mapped into an
-instance unless its height is at least three.
-Section~\ref{sec:advice} provides advice on when to add
-non-origination or unique origination assumptions to roles.
+instance unless its height is at least three.  Penetrator
+non-originating atoms are similar.  Section~\ref{sec:advice} provides
+advice on when to add non-origination or unique origination
+assumptions to roles.
 
 \begin{figure}
 \begin{center}
@@ -476,12 +502,14 @@ term.  Two nodes are related if the transmitting node precedes the
 reception node, as an execution it represents may include nodes
 between the related transmission and reception nodes.
 
-The final two additional components of a skeleton are a set of
-non-originating terms, and a set of uniquely originating terms.  To be
-a skeleton, each uniquely originating term must originate in at most
-one strand in the skeleton, and each non-originating term must never
-be carried by some event in the skeleton and every variable
-that occurs in the term must occur in some event.
+The final three additional components of a skeleton are a set of
+non-originating terms, a set of penetrator non-originating terms, and
+a set of uniquely originating terms.  To be a skeleton, each uniquely
+originating term must originate in at most one strand in the skeleton,
+and each non-originating term must never be carried by some event in
+the skeleton and every variable that occurs in the term must occur in
+some event.  For a penetrator non-originating term, is suffices that
+every variable that occurs in the term must occur in some event.
 Furthermore, for each uniquely originating term that originates in the
 skeleton, the node relation must ensure that reception nodes that
 carry the term follow the node of its origination.
@@ -495,6 +523,7 @@ representation of a skeleton.
    \ldots                ; Instance sequence
    (precedes \ldots)     ; Node orderings
    (non-orig \ldots)     ; Non-originating terms
+   (pen-non-orig \ldots) ; Penetrator non-originating terms
    (uniq-orig \ldots))   ; Uniquely originating terms
 \end{alltt}
 \end{quote}
@@ -558,7 +587,8 @@ with~$A$, the event at corresponding nodes agree, the set of
 uniquely originating terms of~$B$ is a subset of the ones in~$A$, the
 set of non-originating terms of~$B$ is a subset of the ones in~$A$,
 and a uniquely originating term that originates in~$B$ originates at
-the corresponding node in~$A$.
+the corresponding node in~$A$.  Penetrator non-originating assumptions
+are similar to non-originating assumptions.
 
 A skeleton~$A$ message refines~$B$ if~$A$ and~$B$ agree on all but the
 terms in the range of each strand's environment and its
@@ -619,16 +649,16 @@ one indication that a strand is an instance of a listener role.
 \section{Authentication Tests}\label{sec:authentication tests}
 \index{nonce test}\index{encryption test}
 
-Authentication tests guide the search for skeletons that refine one
-with an unrealized node into ones in which it is realized.  There are
-two types of authentication tests, nonce and encryption tests.  In
-both cases, an unrealized node is selected, called the \index{test
-  node}\emph{test node.}  A term carried by the inbound message at the
-test node is identified as the \index{critical term}\emph{critical
-  term.}  A critical term is one that occurs in a message
-context, the construction of which cannot be explained by the regular
-behavior in the current skeleton or by penetrator behavior.  An
-authentication test determines the additional regular behavior
+Authentication tests~\cite{GuttmanThayer02} guide the search for
+skeletons that refine one with an unrealized node into ones in which
+it is realized.  There are two types of authentication tests, nonce
+and encryption tests.  In both cases, an unrealized node is selected,
+called the \index{test node}\emph{test node.}  A term carried by the
+inbound message at the test node is identified as the \index{critical
+  term}\emph{critical term.}  A critical term is one that occurs in a
+message context, the construction of which cannot be explained by the
+regular behavior in the current skeleton or by penetrator behavior.
+An authentication test determines the additional regular behavior
 required to refine a skeleton into ones in which the test node is
 realized.
 
@@ -767,9 +797,9 @@ reader performs a renaming so as to ensure these occurrences do not
 overlap.  Furthermore, the maplets used to specify a strand need not
 specify how to map every role variable.  The reader inserts missing
 mappings, and renames every skeleton variable that also occurs in a
-role of its protocol.  The sort of every skeleton variable that
-occurs in the \texttt{non-orig} or \texttt{uniq-orig} list or in a
-maplet must be declared, using the \texttt{vars} form.
+role of its protocol.  The sort of every skeleton variable that occurs
+in the \texttt{non-orig}, \texttt{pen-non-orig}, or \texttt{uniq-orig}
+list or in a maplet must be declared, using the \texttt{vars} form.
 
 The \textsc{prot-alist}, \textsc{role-alist}, and \textsc{skel-alist}
 productions are Lisp style association lists, that is, lists of
@@ -814,9 +844,12 @@ throughout this paper.  The use of an editor that pretty-prints
 S-expressions is recommended.
 \end{sloppypar}
 
-\begin{flushleft}
-\texttt{;;; Hey Emacs, use -*- mode:scheme -*-}
-\end{flushleft}
+\begin{verbatim}
+;;; Hey Emacs, use -*- mode:scheme -*-
+(herald "Needham-Schroeder Public-Key Protocol"
+        (comment "This protocol contains a man-in-the-middle"
+                 "attack discovered by Galvin Lowe."))
+\end{verbatim}
 
 An S-expression version of Figure~\ref{fig:ns roles} follows.
 
@@ -960,6 +993,12 @@ This section contains the verbatim output of the running example used
 throughout this paper.  A run starts by displaying the program's
 version number.
 
+\begin{verbatim}
+(herald "Needham-Schroeder Public-Key Protocol"
+  (comment "This protocol contains a man-in-the-middle"
+    "attack discovered by Galvin Lowe."))
+\end{verbatim}
+
 \begin{flushleft}
 \texttt{(comment "CPSA {\version}")}\\
 \texttt{(comment "All input read")}
@@ -1059,6 +1098,33 @@ exhausted its to do list.
 (comment "Nothing left to do")
 \end{verbatim}
 
+\section{Macros}\label{sec:macros}
+
+After reading the input, {\cpsa} expands macros before in analyzing
+the results. A macro definition is a top-level form.\index{macros}
+
+\begin{quote}\scshape
+(\texttt{\textup{defmacro}} (name arg${}^\ast$) body)
+\end{quote}
+
+The {\cpsa} program expands all calls to macros in non-macro defining
+S-expressions using the macros that have been defined previously. A
+macro definition can be used to expand a call if the first element of
+a list matches the name of the macro, and the length of the remaining
+elements in the list matches the length of the macro's argument
+list. When two macros definitions are applicable, the last definition
+takes precedence. The {\cpsa} program omits macro definitions from its
+output.
+
+\section{Includes}\label{sec:include}
+
+While performing macro expansion, {\cpsa} includes other source files
+with the top-level include form,\index{includes}
+\begin{quote}\scshape
+(\texttt{\textup{include}} file)
+\end{quote}
+where \texttt{\scshape file} is a string.
+
 \section{Advice}\label{sec:advice}
 
 This section contains advice derived from using {\cpsa}.  When
@@ -1082,16 +1148,6 @@ ensure {\cpsa} does not explore skeletons in which uniquely
 originating data is carried in fields with predictable values, the
 convention is to use the sort \dom{data} for uniquely originating
 data, and sort \dom{text} for the other fields.
-
-Protocols that make use of \index{hashing}hashing can be handled by
-encoding the results of a hash function as an asymmetric encryption in
-which no participant has access to the decryption key.  To use this
-encoding in a role, encrypt the term to be hashed with an otherwise
-unused asymmetric key, and declare its inverse to be non-originating.
-Include an otherwise unused tag within the encryption so
-as to ensure an encryption representing a hashed term cannot be
-confused with an ordinary encryption.  Carefully check each role using
-this encoding and make sure the decryption key is never used.
 
 When looking at the output, try extracting the shapes first.  If the
 shapes only version of the output does not answer your questions, try
@@ -1132,6 +1188,37 @@ that {\cpsa} has the chance to abort the run in a fashion that
 generates graphable output.  Of course, sending us input that causes
 erroneous behavior will help us improve {\cpsa}.
 
+\section{Formula Extraction}\label{sec:formulas}
+
+The \texttt{cpsalogic} program extracts a formula in the language of
+order-sorted first-order logic for each problem and its shapes from a
+{\cpsa} run. The formula is called a shape analysis
+sentence~\cite{Ramsdell12}. The formula is satisfied in all realized
+skeletons when {\cpsa} finds all the shapes for the problem.  The
+details of formula extraction are presented in Appendix~B of The
+{\cpsa} Specification~\cite{cpsaspec09}.
+
+\section{Annotations}\label{sec:annotations}
+
+The \texttt{cpsaannotations} program uses protocol annotations to
+annotate shapes and generate protocol soundness obligations for use
+with the rely-guarantee method of trust
+management~\cite{GuttmanEtAl04,RamsdellEtAl09}.  The language of
+formulas is order-sorted first-order logic extended with a modal says
+operator.  Formula terms may include function symbols that are not
+part of a protocol's message signature.  The syntax of a formula is
+specified in the {\cpsa} Overview~\cite{cpsaoverview09}.
+
+\section{Parameter Analysis}\label{sec:parameters}
+
+The parameters of a role are the atoms that are not acquired by the
+role's trace, but must be available before a complete execution of the
+trace is possible. The \texttt{cpsaparameters} program computes sets
+of sets of parameters consistent with the role. If the expected
+parameter set is not a member, a specification error is indicated.
+The details of parameter analysis are presented in Appendix~A of The
+{\cpsa} Specification~\cite{cpsaspec09}.
+
 \section*{Acknowledgement}
 
 Jonathan K.\@ Millen provided valuable feedback as our first {\cpsa}
@@ -1142,6 +1229,39 @@ user and on a draft of this document.
 \section{BCA Syntax Reference}\label{sec:syntax reference}
 
 \input{bcasyntax}
+
+\section{Omitted Executions}\label{sec:omitted executions}
+
+When given some initial behavior, the {\cpsa} program discovers what
+shapes are compatible with it.  Early work claimed that the {\cpsa}
+algorithm would generate every shape in a finite number of
+steps~\cite{DoghmiGuttmanThayer07,Guttman11}.  Further theoretical
+work showed classes of executions that are not found by the algorithm,
+however it also showed that every omitted execution requires an
+unnatural interpretation of a protocol's roles.  Hence the algorithm
+is complete relative to natural role semantics.  We present an example
+of a protocol that has a shape missed by {\cpsa}.
+
+The protocol has an initiator role and a responder role.
+\begin{center}
+\includegraphics{cpsadiagrams-6.mps}\hfil
+\includegraphics{cpsadiagrams-7.mps}
+\end{center}
+
+Observe that a natural interpretation of~$N_2$ in the responder role
+is that a binding for it is known when an instance of the role begins
+execution.
+
+Consider a scenario in which there is an instance of the initiator
+role where~$N$ is freshly generated and~$K^{-1}$ is uncompromised.
+{\cpsa} will find no shapes compatible with the scenario, however what
+follows is.
+\begin{center}
+\includegraphics{cpsadiagrams-8.mps}
+\end{center}
+Yet this shape requires that the message for~$N_2$ in an instance the
+responder role be obtained from its first message reception---an
+unnatural interpretation of the responder role.
 
 \bibliography{cpsa}
 \bibliographystyle{plain}

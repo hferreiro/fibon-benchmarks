@@ -1,5 +1,5 @@
-(comment "CPSA 2.1.0")
-(comment "All input read")
+(comment "CPSA 2.3.1")
+(comment "All input read from pruning1.scm")
 
 (defprotocol prune basic
   (defrole init
@@ -24,6 +24,7 @@
       (recv (enc n (privk b) (pubk a)))))
   (label 0)
   (unrealized (0 1) (0 2))
+  (origs (n (0 0)))
   (comment "1 in cohort - 1 not yet seen"))
 
 (defskeleton prune
@@ -104,7 +105,9 @@
   (label 4)
   (parent 3)
   (unrealized)
-  (shape))
+  (shape)
+  (maps ((0) ((a a) (b b) (n n))))
+  (origs (n (0 0))))
 
 (comment "Nothing left to do")
 
@@ -138,6 +141,8 @@
       (send (enc n (privk b) (pubk a)))))
   (label 5)
   (unrealized)
-  (shape))
+  (shape)
+  (maps ((0 1 2) ((n n) (a a) (b b))))
+  (origs (n (0 0))))
 
 (comment "Nothing left to do")

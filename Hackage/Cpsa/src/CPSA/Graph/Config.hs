@@ -6,7 +6,9 @@
 -- modify it under the terms of the BSD License as published by the
 -- University of California.
 
-module CPSA.Graph.Config where
+module CPSA.Graph.Config (Config(..), Notation(..), printer) where
+
+import CPSA.Lib.CPSA (SExpr, pp, printItem)
 
 data Config = Config
     { units :: String,          -- Unit of length
@@ -23,5 +25,18 @@ data Config = Config
       dx :: Float,              -- Distance between strands
       dy :: Float,              -- Distance between nodes
       br :: Float,              -- Bullet radius
-      compact :: Bool }         -- Generate compact format
+      compact :: Bool,          -- Generate compact format
+      notation :: Notation,     -- Select notation
+      scripts :: Bool }         -- Enable scripting
     deriving (Show, Read)
+
+data Notation
+    = Prefix                    -- Use S-expression syntax
+    | Infix                     -- Use condensed syntax
+    deriving (Show, Read, Eq)
+
+printer :: Config -> Int -> Int -> SExpr a -> String
+printer conf margin indent sexpr =
+    case notation conf of
+      Prefix -> pp margin indent sexpr
+      Infix -> printItem margin indent sexpr

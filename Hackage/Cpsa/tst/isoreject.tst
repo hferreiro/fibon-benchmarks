@@ -1,5 +1,5 @@
-(comment "CPSA 2.1.0")
-(comment "All input read")
+(comment "CPSA 2.3.1")
+(comment "All input read from isoreject.scm")
 
 (defprotocol isoreject basic
   (defrole init
@@ -22,6 +22,7 @@
       (recv (enc nc nb b (privk a)))))
   (label 0)
   (unrealized (0 2))
+  (origs (nb (0 1)))
   (comment "2 in cohort - 2 not yet seen"))
 
 (defskeleton isoreject
@@ -59,7 +60,9 @@
   (label 2)
   (parent 0)
   (unrealized)
-  (shape))
+  (shape)
+  (maps ((0) ((a a) (b b) (na na) (nb nb) (nc nc))))
+  (origs (nc (1 1)) (nb (0 1))))
 
 (defskeleton isoreject
   (vars (na nb nc text) (a b name))
@@ -68,8 +71,8 @@
   (precedes ((0 1) (1 1)) ((1 2) (0 2)))
   (non-orig (privk a) (privk b))
   (uniq-orig nb)
-  (operation encryption-test (added-strand resp 2)
-    (enc nb na a (privk b)) (1 1))
+  (operation encryption-test (displaced 2 0 resp 2)
+    (enc nb na-0 a (privk b)) (1 1))
   (traces
     ((recv (cat a na)) (send (enc nb na a (privk b)))
       (recv (enc nc nb b (privk a))))
@@ -78,7 +81,9 @@
   (label 3)
   (parent 1)
   (unrealized)
-  (shape))
+  (shape)
+  (maps ((0) ((a a) (b b) (na na) (nb nb) (nc nc))))
+  (origs (nb (0 1))))
 
 (comment "Nothing left to do")
 
@@ -102,6 +107,7 @@
       (send (enc nc nb b (privk a)))))
   (label 4)
   (unrealized (0 1))
+  (origs)
   (comment "2 in cohort - 2 not yet seen"))
 
 (defskeleton isoreject
@@ -120,7 +126,9 @@
   (label 5)
   (parent 4)
   (unrealized)
-  (shape))
+  (shape)
+  (maps ((0) ((b b) (a a) (na na) (nb nb) (nc nc))))
+  (origs))
 
 (defskeleton isoreject
   (vars (na nb nc text) (b a name))
@@ -138,6 +146,8 @@
   (label 6)
   (parent 4)
   (unrealized)
-  (shape))
+  (shape)
+  (maps ((0) ((b b) (a a) (na na) (nb nb) (nc nc))))
+  (origs (nb (1 1))))
 
 (comment "Nothing left to do")

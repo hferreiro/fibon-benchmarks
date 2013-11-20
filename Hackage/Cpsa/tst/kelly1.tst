@@ -1,5 +1,5 @@
-(comment "CPSA 2.1.0")
-(comment "All input read")
+(comment "CPSA 2.3.1")
+(comment "All input read from kelly1.scm")
 
 (defprotocol kelly1 basic
   (defrole client
@@ -41,6 +41,7 @@
       (recv (cat A C (enc policy (pubk S) Ns (privk A))))))
   (label 0)
   (unrealized (0 3))
+  (origs)
   (comment "1 in cohort - 1 not yet seen"))
 
 (defskeleton kelly1
@@ -122,7 +123,7 @@
   (precedes ((1 1) (2 1)) ((1 4) (0 3)) ((2 2) (1 2)) ((2 4) (0 1)))
   (non-orig (privk A) (privk S) (privk AIK))
   (uniq-orig Ns N)
-  (operation encryption-test (added-strand server 5)
+  (operation encryption-test (displaced 2 3 server 5)
     (enc response Ns (privk S)) (0 1))
   (traces
     ((send (cat C S request))
@@ -142,6 +143,11 @@
   (label 3)
   (parent 2)
   (unrealized)
-  (shape))
+  (shape)
+  (maps
+    ((0)
+      ((A A) (C C) (S S) (Ns Ns) (request request) (Check Check)
+        (policy policy) (response response))))
+  (origs (Ns (2 2)) (N (1 1))))
 
 (comment "Nothing left to do")

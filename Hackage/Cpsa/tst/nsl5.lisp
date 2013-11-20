@@ -1,3 +1,5 @@
+(herald nsl5 (bound 10))
+
 (defprotocol nsl5 basic
   (defrole init
     (vars (a b c d e name)

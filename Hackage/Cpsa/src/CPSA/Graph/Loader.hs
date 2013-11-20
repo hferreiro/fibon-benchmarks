@@ -13,14 +13,16 @@
 
 module CPSA.Graph.Loader (Preskel, Vertex, protocol, role, env, inst,
                           part, lastVertex, vertices, Node, vnode,
-                          strands, label, parent, seen, unrealized,
-                          protSrc, preskelSrc, initial, strand, pos,
-                          prev, next, msg, succs, preds, loadDefs)
+                          strands, label, parent, seen, unrealized, shape,
+                          empty, protSrc, preskelSrc, initial, strand, pos,
+                          prev, next, msg, out, succs, preds,
+                          State, loadFirst, loadNext)
                           where
 
 import qualified Data.List as L
 import Control.Monad
 import CPSA.Lib.CPSA
+import CPSA.Lib.Entry (gentlyReadSExpr)
 
 -- A view of protocols and preskeletons designed for display.
 
@@ -33,8 +35,10 @@ data Preskel = Preskel
       strands :: Int,           -- Number of strands
       initial :: [Vertex],      -- The initial node in each strand
       unrealized :: Maybe [Vertex], -- Nodes not realized if available
-      protSrc :: SExpr Pos,       -- Source for the protocol
-      preskelSrc :: SExpr Pos }   -- Source for this preskeleton
+      shape :: Bool,            -- Is preskel a shape?
+      empty :: Bool,            -- Does preskel have an empty cohort?
+      protSrc :: SExpr Pos,     -- Source for the protocol
+      preskelSrc :: SExpr Pos } -- Source for this preskeleton
     deriving Show
 
 instance Eq Preskel where
@@ -45,14 +49,15 @@ instance Ord Preskel where
 
 data Inst = Inst
     { part :: String,       -- Role name (empty if this is a listener)
-      mapping :: String,  -- Environment (empty if this is a listener)
-      trace :: [String] }      -- Transmit or reception directed terms
+      mapping :: SExpr Pos, -- Environment (empty if this is a listener)
+      trace :: Trace }      -- Transmit or reception directed terms
     deriving Show
 
 -- A vertex v contains the information associated with the node
 -- (strand v, pos v).
 data Vertex = Vertex
-    { msg :: String,
+    { msg :: SExpr Pos,
+      out :: Bool,              -- Transmission node?
       inst :: Inst,
       prev :: Maybe Vertex,     -- Strand previous
       next :: Maybe Vertex,     -- Strand next
@@ -77,7 +82,7 @@ role :: Vertex -> String
 role v = part (inst v)
 
 -- Returns the env associated with the node
-env :: Vertex -> String
+env :: Vertex -> SExpr Pos
 env v = mapping (inst v)
 
 lastVertex :: Vertex -> Vertex
@@ -115,37 +120,60 @@ vnode v = (strand v, pos v)
 
 type Pair = (Node, Node)        -- An ordering of nodes
 
--- Load the initial comments and top-level defs or return an error
--- message
+-- Loader
 
-loadDefs :: Monad m => [SExpr Pos] -> m ([SExpr Pos], [Preskel])
-loadDefs xs =
+-- Load one preskeleton at a time from the input.  The state of
+-- loading follows.
+
+newtype State = State (PosHandle, Int, [(String, Protocol)])
+
+-- Load the initial comments and the first preskeleton.  It's an error
+-- if there is no preskeleton in the input.
+
+loadFirst :: PosHandle -> IO ([SExpr Pos], Preskel, State)
+loadFirst h =
+    loadComments h []
+
+loadComments :: PosHandle -> [SExpr Pos] -> IO ([SExpr Pos], Preskel, State)
+loadComments h cmts =
     do
-      let (cmts, xs') = loadComments [] xs
-      (_, ks, _) <- foldM loadSExpr ([], [], 0) xs'
-      return (reverse cmts, reverse ks)
+      x <- gentlyReadSExpr h
+      case x of
+        Nothing -> fail "Empty input"
+        Just x ->
+            case x of
+              cmt@(L _ (S _ "comment" : _)) ->
+                  loadComments h (cmt:cmts)
+              cmt@(L _ (S _ "herald" : _)) ->
+                  loadComments h (cmt:cmts)
+              _ ->
+                  do
+                    n <- loadSExpr (State (h, 0, [])) x
+                    case n of
+                      Nothing -> fail "Empty input"
+                      Just (p, s) -> return (reverse cmts, p, s)
 
-loadComments :: [SExpr Pos] -> [SExpr Pos] -> ([SExpr Pos], [SExpr Pos])
-loadComments cmts (cmt@(L _ (S _ "comment" : _)): xs) = 
-    loadComments (cmt:cmts) xs
-loadComments cmts xs = (cmts, xs)
+-- Load the next preskeleton or return Nothing on EOF
+loadNext :: State -> IO (Maybe (Preskel, State))
+loadNext s@(State (h, _, _)) =
+    do
+      x <- gentlyReadSExpr h
+      case x of
+        Nothing -> return Nothing
+        Just x -> loadSExpr s x
 
--- The integer is used to add a label to preskeleton without one.
-type LoadSExpr = ([(String, Protocol)], [Preskel], Int)
-
-loadSExpr :: Monad m => LoadSExpr -> SExpr Pos -> m LoadSExpr
-loadSExpr (ps, ks, tag) x@(L pos (S _ "defprotocol" : xs)) =
+-- Load from one S-expression
+loadSExpr :: State -> SExpr Pos -> IO (Maybe (Preskel, State))
+loadSExpr (State (h, tag, ps)) x@(L pos (S _ "defprotocol" : xs)) =
     do
       p <- loadProt x pos xs
-      return (p : ps, ks, tag)
-loadSExpr (ps, ks, tag) x@(L pos (S _ "defskeleton" : xs)) =
+      loadNext (State (h, tag, p:ps)) -- Add protocol to state
+loadSExpr (State (h, tag, ps)) x@(L pos (S _ "defskeleton" : xs)) =
     do
       k <- loadPreskel x pos ps tag xs
-      -- Ensure labels are unique
-      case any ((== (label k)) . label) ks of
-        True -> fail (shows pos ("Duplicate label " ++ show (label k)))
-        False -> return (ps, k : ks, tag + 1)
-loadSExpr le (L _ (S _ "comment" : _)) = return le
+      return (Just (k, State (h, 1 + max tag (label k), ps)))
+loadSExpr s (L _ (S _ "comment" : _)) =
+    loadNext s
 loadSExpr _ x = fail (shows (annotation x) "Malformed input")
 
 -- Protocols
@@ -204,9 +232,9 @@ loadInsts s top p tag insts cs (L pos (S _ "defstrand" : x) : xs) =
 loadInsts s top p tag insts cs (L pos (S _ "deflistener" : x) : xs) =
     case x of
       [term] ->
-          let e0 = show (L pos [S pos "recv", term]) in
-          let e1 = show (L pos [S pos "send", term]) in
-          let i = Inst { part = "", mapping = "", trace = [e0, e1] } in
+          let e0 = L pos [S pos "recv", term] in
+          let e1 = L pos [S pos "send", term] in
+          let i = Inst { part = "", mapping = L pos [], trace = [e0, e1] } in
           let (_, cs') = case cs of
                            L _ c : cs' -> (c, cs')
                            _ -> ([], []) in
@@ -224,6 +252,8 @@ loadInsts s pos p tag revInsts _ xs =
         False -> return ()
       let heights = map (length . trace) insts
       unrealized <- loadNodes heights (assoc "unrealized" xs)
+      let shape = maybe False (const True) (assoc "shape" xs)
+      let empty = elem "empty cohort" (qassoc "comment" xs)
       let orderings = maybe [] id (assoc "precedes" xs)
       pairs <- loadOrderings heights orderings
       let graph = adj heights pairs
@@ -241,12 +271,15 @@ loadInsts s pos p tag revInsts _ xs =
                              strands = strands,
                              initial = initial,
                              unrealized = unrealized',
+                             shape = shape,
+                             empty = empty,
                              protSrc = src p,
                              preskelSrc = s }
             where
               initial = map head nodes -- The first node in each strand
               nodes = [ [ Vertex {
-                            msg = msg,
+                            msg = evtMsg evt,
+                            out = outbound evt,
                             inst = inst,
                             prev = getPrev (s, p),
                             next = getNext ht (s, p),
@@ -254,9 +287,13 @@ loadInsts s pos p tag revInsts _ xs =
                             succs = getSuccs (s, p),
                             strand = s,
                             pos = p } |
-                          (p, msg) <- zip [0..] (trace inst) ] |
+                          (p, evt) <- zip [0..] (trace inst) ] |
                         (s, inst) <- zip [0..] insts,
                         let ht = length (trace inst) ]
+              evtMsg (L _ [S _ _, t]) = t
+              evtMsg x = x      -- Handle bad syntax
+              outbound (L _ [S _ "send", _]) = True
+              outbound _ = False
               getNode (s, p) = nodes !! s !! p
               getPrev (s, p)
                   | p > 0 = Just (getNode (s, p - 1))
@@ -312,7 +349,7 @@ loadInst pos p c role ht env =
             True -> fail (shows pos "Bad height")
             False ->
                 do
-                  let mapping = show (L pos env)
+                  let mapping = L pos env
                   env <- loadMaplet env
                   let evts = itrace env c (take ht trace)
                   return Inst { part = role,
@@ -320,12 +357,12 @@ loadInst pos p c role ht env =
                                 trace = evts }
 
 -- Compute an instance's trace, using the traces output where possible.
-itrace :: [(String, SExpr Pos)] -> [SExpr Pos] -> [SExpr Pos] -> [String]
+itrace :: [(String, SExpr Pos)] -> [SExpr Pos] -> Trace -> Trace
 itrace _ _ [] = []
 itrace env (c : cs) (_: rs) =
-    show c : itrace env cs rs
+    c : itrace env cs rs
 itrace env [] (r : rs) =
-    show (subst env r) : itrace env [] rs
+    subst env r : itrace env [] rs
 
 loadMaplet :: Monad m => [SExpr Pos] -> m [(String, SExpr Pos)]
 loadMaplet (L _ [S _ name, x] : xs) =
@@ -363,6 +400,16 @@ assoc key alist =
 
 -- assoc key alist =
 --    concat [ rest | L _ (S _ head : rest) <- alist, key == head ]
+
+qassoc :: String -> [SExpr Pos] -> [String]
+qassoc key xs =
+  case assoc key xs of
+    Nothing -> []
+    Just vals ->
+      concatMap f vals
+      where
+        f (Q _ s) = [s]
+        f _ = []
 
 nassoc :: Monad m => String -> [SExpr Pos] -> m (Maybe Int)
 nassoc key xs =

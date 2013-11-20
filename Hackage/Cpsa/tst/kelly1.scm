@@ -19,10 +19,6 @@
   (defrole client
     (vars (C name) (A name) (S name) (Ns text) (request text) (Check text)  (policy text) (response text))
     (trace
-
-   ;;non = ();
-  ;; uniq = ();
-
      (send (cat C S request))
      (recv (cat S C (enc (cat response Ns)
 			 (privk S))))
@@ -36,8 +32,6 @@
     (vars (C name) (A name) (S name) (N text) (Ns text) (hello text)
 	  (Quote text) (measurements text) (Check text) (policy text)
 	  (AIK name))
-   ;;non = (privk(A);privk(AIK));
-    ;;uniq = (N);
     (trace
      (recv (cat S A hello))
      (send (cat A S N))
@@ -58,8 +52,6 @@
     (vars (C name) (A name) (S name) (N text) (Ns text) (hello text)
 	  (Quote text) (measurements text) (request text) (response text)
 	  (AIK name))
-    ;;non = (privk(S);privk(AIK));
-   ;;uniq = (Ns);
    (trace
       (send (cat S A hello))
       (recv (cat A S N))
@@ -72,7 +64,7 @@
       (send (cat S C (enc (cat response Ns)
 			  (privk S))))
       )
-   (non-orig  (privk S) (privk AIK))
+   (non-orig (privk S) (privk AIK))
    (uniq-orig  Ns)
    )
 )

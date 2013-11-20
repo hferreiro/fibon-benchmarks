@@ -58,9 +58,9 @@ beginfig(1);
   strand.a(3, origin, delta, btex $\mathstrut\mathit{resp}$ etex, node);
 
   % Messages
-  inbnd.a(1, dir_width, btex $\enc{N_1, A}{K_B}$ etex);
-  outbnd.a(2, dir_width, btex $\enc{N_1, N_2}{K_A}$ etex);
-  inbnd.a(3, dir_width, btex $\enc{N_2}{K_B}$ etex);
+  rinbnd.a(1, dir_width, btex $\enc{N_1, A}{K_B}$ etex);
+  routbnd.a(2, dir_width, btex $\enc{N_1, N_2}{K_A}$ etex);
+  rinbnd.a(3, dir_width, btex $\enc{N_2}{K_B}$ etex);
 endfig;
 
 % Intended run
@@ -197,6 +197,46 @@ beginfig(5);
   label.top(btex $\enc{N_2}{K_B}$ etex,
     alpha[a3.e, (xpart o2.w, ypart a3.c)]);
   drawmsg(a3.e -- (beta * xpart o2.w, ypart a3.c));
+endfig;
+
+% Incompleteness example
+
+% Initiator role
+
+beginfig(6);
+  % Backbone
+  strand.a(2, origin, delta, btex $\mathstrut\mathit{init}$ etex, node);
+
+  % Messages
+  outbnd.a(1, dir_width, btex $\enc{N}{K}$ etex);
+  inbnd.a(2, dir_width, btex $N$ etex);
+endfig;
+
+% Responder role
+
+beginfig(7);
+  % Backbone
+  strand.a(2, origin, delta, btex $\mathstrut\mathit{resp}$ etex, node);
+
+  % Messages
+  rinbnd.a(1, dir_width, btex $\enc{N_1}{K}$ etex);
+  routbnd.a(2, dir_width, btex $N_2$ etex);
+endfig;
+
+% Omitted run
+
+beginfig(8);
+  % Strand for principal A
+  strand.a(2, origin, delta, btex $\mathstrut\mathit{init}$ etex, node);
+
+  % Strand for principal B
+  strand.b(2, .5w, delta, btex $\mathstrut\mathit{resp}$ etex, node);
+
+  % Messages and arrows
+  label.top(btex $\enc{N}{K}$ etex, .5[a1.e, b1.w]);
+  drawmsg(a1.e -- b1.w);
+  label.top(btex $N$ etex, .5[a2.e, b2.w]);
+  drawmsg(b2.w -- a2.e);
 endfig;
 
 verbatimtex

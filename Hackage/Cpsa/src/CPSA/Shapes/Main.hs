@@ -12,7 +12,6 @@
 module Main (main) where
 
 import System.IO
-import System.IO.Error
 import CPSA.Lib.CPSA (PosHandle, SExpr, Pos)
 import CPSA.Lib.Entry
 import CPSA.Shapes.Shapes
@@ -33,7 +32,7 @@ go f p a =
     where
       loop a =
           do
-            x <- readSExpr p
+            x <- gentlyReadSExpr p
             case x of
               Nothing ->
                   return ()
@@ -45,7 +44,7 @@ go f p a =
 step :: Handle -> Int -> Map -> SExpr Pos -> IO Map
 step output margin acc sexpr =
     do
-      x <- try (shape acc sexpr)
+      x <- tryIO (shape acc sexpr)
       case x of
         Right (acc, sexpr) ->
             case sexpr of
@@ -56,4 +55,4 @@ step output margin acc sexpr =
                     writeLnSEexpr output margin sexpr
                     return acc
         Left err ->
-            abort (ioeGetErrorString err)
+            abort (show err)

@@ -10,11 +10,9 @@
 module CPSA.Lib.SExpr (SExpr(..), showQuoted, annotation, Pos,
                        PosHandle, posHandle, load) where
 
-import Data.Char (isSpace, isDigit, isAlphaNum, isPrint, isAscii)
+import Data.Char (isSpace, isDigit, isAlphaNum, isPrint)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import System.IO (Handle, hIsEOF, hGetChar, hLookAhead, hClose)
-
-import Fibon.Run.BenchmarkHelper
 
 -- An S-expression--all of its constructors are strict.
 data SExpr a
@@ -22,13 +20,14 @@ data SExpr a
     | Q !a !String                 -- A quoted string
     | N !a !Int                    -- An integer
     | L !a ![SExpr a]              -- A proper list
-      deriving Eq
 
-instance NFData a => NFData (SExpr a) where
-  rnf (S a _) = rnf a
-  rnf (Q a _) = rnf a
-  rnf (N a _) = rnf a
-  rnf (L a l) = rnf a `seq` rnf l
+-- Equality ignores position annotations
+instance Eq (SExpr a) where
+    S _ s == S _ s' = s == s'
+    Q _ s == Q _ s' = s == s'
+    N _ n == N _ n' = n == n'
+    L _ xs == L _ xs' = xs == xs'
+    _ == _ = False
 
 -- Printing support
 
@@ -106,7 +105,7 @@ load p =
               setPosHandle p l c
               return $ Just x
         Rparen pos ->
-            fail (shows pos "Close of unopened list")
+            abort p (shows pos "Close of unopened list")
         Eof ->
             do
               hClose $ pHandle p
@@ -128,7 +127,7 @@ list p pos l c xs =
               (l, c, x) <- list p pos' l c []
               list p pos l c (x : xs)
         Eof ->
-            fail (shows pos "Unexpected end of input in list")
+            abort p (shows pos "Unexpected end of input in list")
 
 -- Read the next character returning Nothing on EOF
 get :: PosHandle -> IO (Maybe Char)
@@ -204,7 +203,7 @@ atom p l c pos '"' = string p l c pos []
 atom p l c pos ch | isDigit ch = number p l c pos [ch]
 atom p l c pos ch | ch == '+' || ch == '-' = numOrSym p l c pos [ch]
 atom p l c pos ch | isSym ch = symbol p l c pos [ch]
-atom _ _ _ pos _ = fail (shows pos "Bad char in atom")
+atom p _ _ pos _ = abort p (shows pos "Bad char in atom")
 
 -- Scan a quoted string of characters
 string :: PosHandle -> Int -> Int -> Pos -> String -> IO (Int, Int, Token)
@@ -213,13 +212,13 @@ string p l c pos s =
       ch <- get p
       case ch of
         Nothing ->
-            fail (shows pos "End of input in string")
+            abort p (shows pos "End of input in string")
         Just '"' ->
             return (l, c + 1, Atom (Q pos (seqrev s)))
         Just ch | isStr ch ->
             string p l (c + 1) pos (ch : s)
         Just _ ->
-            fail (shows pos "Bad char for string")
+            abort p (shows pos "Bad char for string")
 
 -- Scan a sequence of digits
 number :: PosHandle -> Int -> Int -> Pos -> String -> IO (Int, Int, Token)
@@ -234,7 +233,7 @@ number p l c pos s =
               _ <- hGetChar $ pHandle p
               number p l (c + 1) pos (ch : s)
         Just ch | isSym ch ->
-            fail (shows pos "Bad char after number")
+            abort p (shows pos "Bad char after number")
         Just _ ->
             return (l, c, Atom (N pos (read (seqrev s))))
 
@@ -273,14 +272,37 @@ seqrev l =
 
 -- A symbol is made from alphanumeric characters or special
 -- characters.  A symbol may not start with a digit, or with a plus or
--- minus sign followed by a digit.
+-- minus sign followed by a digit.  The special characters are
+-- "+-*/<=>!?:$%_&~^".
+
 isSym :: Char -> Bool
-isSym c =  isAlphaNum c || elem c specialChars
+isSym '+' = True
+isSym '-' = True
+isSym '*' = True
+isSym '/' = True
+isSym '<' = True
+isSym '=' = True
+isSym '>' = True
+isSym '!' = True
+isSym '?' = True
+isSym ':' = True
+isSym '$' = True
+isSym '%' = True
+isSym '_' = True
+isSym '&' = True
+isSym '~' = True
+isSym '^' = True
+isSym c = isAlphaNum c
 
-specialChars :: String
-specialChars = "+-*/<=>!?:$%_&~^"
-
--- A string is made from alphanumeric characters or an extension of the
--- special characters.
+-- A string is made from printable characters.
 isStr :: Char -> Bool
-isStr c = isPrint c && isAscii c && c /= '"' && c /= '\\'
+isStr '"' = False
+isStr '\\' = False
+isStr c = isPrint c
+
+-- Close input handle and then report failure
+abort :: PosHandle -> String -> IO a
+abort p msg =
+    do
+      hClose $ pHandle p
+      fail msg

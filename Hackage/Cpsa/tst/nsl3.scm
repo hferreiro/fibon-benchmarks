@@ -1,3 +1,5 @@
+(herald "Three Party Needham-Schroeder-Lowe Protocol")
+
 (defprotocol nsl3 basic
   (defrole init (vars (a b c name) (na0 na1 nb0 nb1 nc0 nc1 text))
     (trace

@@ -11,13 +11,14 @@ module CPSA.Annotations.Annotations (Prot, annotations) where
 import Control.Monad
 import qualified Data.List as L
 import qualified Data.Set as S
+import qualified Data.Maybe as M
 import CPSA.Lib.CPSA
 import CPSA.Annotations.Formulas
 
 {--
 import System.IO.Unsafe
 z :: Show a => a -> b -> b
-z x y = seq (unsafePerformIO (print x)) y
+z x y = unsafePerformIO (print x >> return y)
 --}
 
 -- Constructs the output or reports an error from the input given a
@@ -26,8 +27,7 @@ z x y = seq (unsafePerformIO (print x)) y
 -- for processing preskeletons.
 
 annotations :: (Algebra t p g s e c, Monad m) => String -> g ->
-         [Prot t p g s e c] -> SExpr Pos ->
-         m ([Prot t p g s e c], SExpr Pos)
+         [Prot t g] -> SExpr Pos -> m ([Prot t g], SExpr Pos)
 annotations name origin ps x@(L pos (S _ "defprotocol" : xs)) =
     do
       p <- loadProt name origin pos xs
@@ -42,25 +42,25 @@ annotations _ _ ps x = return (ps, x)
 
 -- The Prot record contains information extraced from protocols for
 -- use when processing preskeletons.
-data Algebra t p g s e c => Prot t p g s e c = Prot
+data Prot t g = Prot
     { pname :: String,          -- Protocol name
       gen :: g,                 -- Generator for preskeletons
-      roles :: [Role t p g s e c] }
+      roles :: [Role t] }
     deriving Show
 
 -- The Role record contains information extraced from roles for use
 -- when processing preskeletons.
-data Algebra t p g s e c => Role t p g s e c = Role
+data Role t = Role
     { rname :: String,          -- Role name
       vars :: [t],              -- Declared variables
       prin :: t,                -- Principal
-      forms :: [Formula t p g s e c] } -- Annotations
+      forms :: [Formula t] }    -- Annotations
     deriving Show
 
 -- Load a protocol.  On success, returns a Prot record.
 
 loadProt :: (Algebra t p g s e c, Monad m) => String -> g ->
-            Pos -> [SExpr Pos] -> m (Prot t p g s e c)
+            Pos -> [SExpr Pos] -> m (Prot t g)
 loadProt nom origin pos (S _ name : S _ alg : x : xs)
     | alg /= nom =
         fail (shows pos $ "Expecting terms in algebra " ++ nom)
@@ -77,12 +77,12 @@ loadProt _ _ pos _ =
 -- its roles.
 
 loadRoles :: (Algebra t p g s e c, Monad m) => g ->
-             [SExpr Pos] -> m (g, [Role t p g s e c])
+             [SExpr Pos] -> m (g, [Role t])
 loadRoles origin xs =
     mapAccumLM loadRole origin xs
 
 loadRole :: (Algebra t p g s e c, Monad m) => g ->
-            SExpr Pos -> m (g, Role t p g s e c)
+            SExpr Pos -> m (g, Role t)
 loadRole gen (L pos (S _ "defrole" :
                      S _ name :
 	             L _ (S _ "vars" : vars) :
@@ -99,7 +99,7 @@ loadRole _ x =
     fail (shows (annotation x) "Malformed role")
 
 loadFormulas :: (Algebra t p g s e c, Monad m) => Pos -> [t] -> Int ->
-                g -> [SExpr Pos] -> m (g, t, [Formula t p g s e c])
+                g -> [SExpr Pos] -> m (g, t, [Formula t])
 loadFormulas pos vars len gen (x : xs) =
     do
       prin <- loadTerm vars x
@@ -115,7 +115,7 @@ loadFormulas pos _ _ _ [] =
     fail (shows pos "Role missing annotations")
 
 loadIndexedFormula :: (Algebra t p g s e c, Monad m) => [t] -> Int ->
-                      g -> SExpr Pos -> m (g, (Int, Formula t p g s e c))
+                      g -> SExpr Pos -> m (g, (Int, Formula t))
 loadIndexedFormula _ len _ (L _ [N pos i, _])
     | i < 0 || i >= len = fail (shows pos "Bad index for formula")
 loadIndexedFormula vars _ gen (L _ [N _ i, form]) =
@@ -127,7 +127,7 @@ loadIndexedFormula _ _ _ x =
 
 -- Ensure there are no formulas with the same index
 checkIndices :: (Algebra t p g s e c, Monad m) => Pos ->
-                [(Int, Formula t p g s e c)] -> m ()
+                [(Int, Formula t)] -> m ()
 checkIndices _ [] = return ()
 checkIndices pos ((i, _) : alist)
     | any ((== i) . fst) alist =
@@ -136,10 +136,10 @@ checkIndices pos ((i, _) : alist)
 
 -- Load a preskeleton
 
-data Algebra t p g s e c => Instance t p g s e c = Instance
+data Instance t e = Instance
     -- Role from which this was instantiated (Nothing for listeners)
     { pos :: Pos,               -- Instance position
-      role :: Maybe (Role t p g s e c),
+      role :: Maybe (Role t),
       env :: e,                 -- The environment
       height :: Int }           -- Height of the instance
     deriving Show
@@ -152,17 +152,16 @@ type Node = (Int, Int)          -- (Strand, Position)
 
 type Pair = (Node, Node)        -- Precedes relation
 
-data Algebra t p g s e c => Preskel t p g s e c = Preskel
-    -- Role from which this was instantiated (Nothing for listeners)
-    { protocol :: Prot t p g s e c,
-      insts :: [Instance t p g s e c],
+data Preskel t g e = Preskel
+    { protocol :: Prot t g,
+      insts :: [Instance t e],
       traces :: [Trace],
       orderings :: [Pair] }
 
 -- Find protocol and then load preskeleton.
 -- Remove any old annotations, and add new ones.
 findPreskel :: (Algebra t p g s e c, Monad m) => Pos ->
-               [Prot t p g s e c] -> [SExpr Pos] -> m (SExpr Pos)
+               [Prot t g] -> [SExpr Pos] -> m (SExpr Pos)
 findPreskel pos ps (S _ name : xs) =
     case L.find (\p -> name == pname p) ps of
       Nothing -> fail (shows pos $ "Protocol " ++ name ++ " unknown")
@@ -173,7 +172,7 @@ findPreskel pos ps (S _ name : xs) =
 findPreskel pos _ _ = fail (shows pos "Malformed skeleton")
 
 updatePreskel :: (Algebra t p g s e c, Monad m) => Pos ->
-                 Prot t p g s e c -> [SExpr Pos] -> m [SExpr Pos]
+                 Prot t g -> [SExpr Pos] -> m [SExpr Pos]
 updatePreskel pos prot (vs@(L _ (S _ "vars" : vars)) : xs)
     | not (realized xs) || not (hasKey tracesKey xs) =
         return (vs : xs)        -- Don't annotate
@@ -193,8 +192,8 @@ realized :: [SExpr a] -> Bool
 realized xs =
     null (assoc "unrealized" xs) && hasKey "unrealized" xs
 
-loadPreskel :: (Algebra t p g s e c, Monad m) => Prot t p g s e c ->
-               g -> [t] -> [SExpr Pos] -> m (Preskel t p g s e c)
+loadPreskel :: (Algebra t p g s e c, Monad m) => Prot t g ->
+               g -> [t] -> [SExpr Pos] -> m (Preskel t g e)
 loadPreskel prot gen kvars xs =
     do
       traces <- mapM loadTrace (assoc tracesKey xs)
@@ -206,9 +205,9 @@ loadPreskel prot gen kvars xs =
                         traces = traces,
                         orderings = orderings })
 
-loadInsts :: (Algebra t p g s e c, Monad m) => Prot t p g s e c ->
-             g -> [t] -> [Instance t p g s e c] -> [SExpr Pos] ->
-             m [Instance t p g s e c]
+loadInsts :: (Algebra t p g s e c, Monad m) => Prot t g ->
+             g -> [t] -> [Instance t e] -> [SExpr Pos] ->
+             m [Instance t e]
 loadInsts prot gen kvars insts (L pos (S _ "defstrand" : x) : xs) =
     case x of
       S _ role : N _ height : env ->
@@ -229,9 +228,9 @@ loadInsts prot kvars gen insts (L pos (S _ "deflistener" : x) : xs) =
 loadInsts _ _ _ insts _ =
     return (reverse insts)
 
-loadInst :: (Algebra t p g s e c, Monad m) => Pos -> Prot t p g s e c ->
+loadInst :: (Algebra t p g s e c, Monad m) => Pos -> Prot t g ->
             g -> [t] -> String -> Int -> [SExpr Pos] ->
-            m (g, Instance t p g s e c)
+            m (g, Instance t e)
 loadInst pos prot gen kvars role height env =
     do
       r <- lookupRole pos prot role
@@ -243,7 +242,7 @@ loadInst pos prot gen kvars role height env =
                                env = env, height = height })
 
 lookupRole :: (Algebra t p g s e c, Monad m) => Pos ->
-              Prot t p g s e c -> String -> m (Role t p g s e c)
+              Prot t g -> String -> m (Role t)
 lookupRole pos prot role =
     case L.find (\r -> role == rname r) (roles prot) of
       Nothing ->
@@ -257,8 +256,8 @@ loadMaplet kvars vars env (L pos [domain, range]) =
       t <- loadTerm vars domain
       t' <- loadTerm kvars range
       case match t t' env of
-        Nothing -> fail (shows pos "Domain does not match range")
-        Just env' -> return env'
+        env' : _ -> return env'
+        [] -> fail (shows pos "Domain does not match range")
 loadMaplet _ _ _ x = fail (shows (annotation x) "Malformed maplet")
 
 -- Load a trace
@@ -277,13 +276,12 @@ loadDt x = fail (shows (annotation x) "Malformed direction")
 -- Load the node orderings
 
 loadOrderings :: Monad m => Strands -> [SExpr Pos] -> m [Pair]
-loadOrderings strands xs =
-    foldM f [] xs
-    where
-      f ns x =
-          do
-            np <- loadPair strands x
-            return (adjoin np ns)
+loadOrderings _ [] = return []
+loadOrderings strands (x : xs) =
+    do
+      np <- loadPair strands x
+      nps <- loadOrderings strands xs
+      return (adjoin np nps)
 
 loadPair :: Monad m => [Int] -> SExpr Pos -> m Pair
 loadPair heights (L pos [x0, x1]) =
@@ -315,11 +313,11 @@ loadNode _ x = fail (shows (annotation x) "Malformed node")
 
 -- Formula instantiation
 
-type Annotations t p g s e c = Maybe (t, [Formula t p g s e c])
+type Annotations t = Maybe (t, [Formula t])
 
 -- Construct the annotations for an instance
 instAnnos :: (Algebra t p g s e c, Monad m) =>
-             Instance t p g s e c -> m (Annotations t p g s e c)
+             Instance t e -> m (Annotations t)
 -- A listener has no annotations
 instAnnos (Instance { role = Nothing }) = return Nothing
 instAnnos i@(Instance { pos = pos, role = Just r }) =
@@ -352,7 +350,7 @@ transTerm pos vars env t =
 
 -- Instantiate formula and ensure all the free variables have been mapped.
 transForm :: (Algebra t p g s e c, Monad m) => Pos -> [t] -> e ->
-             Formula t p g s e c -> m (Formula t p g s e c)
+             Formula t -> m (Formula t)
 transForm pos vars env f =
     let f' = finstantiate env f in
     case L.find (flip S.member (freeVars f')) vars of
@@ -362,7 +360,7 @@ transForm pos vars env f =
                showsTerm vars var " is not mapped in a formula"
 
 displayAnnos :: Algebra t p g s e c => [t] ->
-                [Annotations t p g s e c] -> SExpr ()
+                [Annotations t] -> SExpr ()
 displayAnnos vars annos =
     L () (S () annotationsKey : table)
     where
@@ -420,7 +418,7 @@ successors strands =
     [((s, p), (s, p + 1)) | (s, n) <- zip [0..] strands, p <- nats (n - 1)]
 
 before :: (Algebra t p g s e c, Monad m) => Pos ->
-          Preskel t p g s e c -> m [(Node, [Node])]
+          Preskel t g e -> m [(Node, [Node])]
 before pos k =
     case isAcyclic graph nodes of
       False -> fail (shows pos "Cycle found")
@@ -440,11 +438,10 @@ alist traces precedes =
       node n = (n, L.sort (depends n))
       depends n = [ n0 | (n0, n1) <- precedes, n == n1 ]
 
-type Obligation t p g s e c = (Node, t, Formula t p g s e c)
+type Obligation t = (Node, t, Formula t)
 
 obligations :: (Algebra t p g s e c, Monad m) => Pos ->
-               Preskel t p g s e c -> [Annotations t p g s e c] ->
-               m [Obligation t p g s e c]
+               Preskel t g e -> [Annotations t] -> m [Obligation t]
 obligations pos k annos =
     do
       depends <- before pos k
@@ -452,24 +449,22 @@ obligations pos k annos =
       -- filter out trivial obligations
       return [ obl | Just obl@(_, _, f) <- obls, not (truth f) ]
 
-obligation :: Algebra t p g s e c => [Annotations t p g s e c] ->
-              (Node, [Node]) -> Maybe (Obligation t p g s e c)
+obligation :: Algebra t p g s e c => [Annotations t] ->
+              (Node, [Node]) -> Maybe (Obligation t)
 obligation annos (n@(s, p), ns) =
     do
       (t, fs) <- annos !! s                      -- t relies on (fs !! p)
       let guar = [ if t == t' then f else says t' f | -- Believe t
                    (s, p) <- ns,                 -- For each predecessor
-                   let Just (t', fs) = annos !! s, -- t' is the speaker
+                   (t', fs) <- M.maybeToList (annos !! s), -- t' is the speaker
                    let f = fs !! p ]               -- f is the guarantee
       return (n, t, implies guar (fs !! p))
 
-displayObls :: Algebra t p g s e c => [t] ->
-               [Obligation t p g s e c] -> SExpr ()
+displayObls :: Algebra t p g s e c => [t] -> [Obligation t] -> SExpr ()
 displayObls vars obls =
     L () (S () obligationsKey : map (displayObl vars) obls)
 
-displayObl :: Algebra t p g s e c => [t] ->
-              Obligation t p g s e c -> SExpr ()
+displayObl :: Algebra t p g s e c => [t] -> Obligation t -> SExpr ()
 displayObl vars (n, t, f) =
     L () [displayNode n, displayTerm ctx t, displayFormula vars f]
     where

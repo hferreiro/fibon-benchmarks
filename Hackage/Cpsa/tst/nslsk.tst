@@ -1,5 +1,7 @@
-(comment "CPSA 2.1.0")
-(comment "All input read")
+(herald "Needham-Schroeder-Lowe Protocol with symmetric encryption")
+
+(comment "CPSA 2.3.1")
+(comment "All input read from nslsk.scm")
 
 (defprotocol nslsk basic
   (defrole init
@@ -21,6 +23,7 @@
       (recv (enc t k))))
   (label 0)
   (unrealized (0 2))
+  (origs (k (0 1)))
   (comment "2 in cohort - 2 not yet seen"))
 
 (defskeleton nslsk
@@ -74,7 +77,9 @@
   (label 3)
   (parent 1)
   (unrealized)
-  (shape))
+  (shape)
+  (maps ((0) ((a a) (k k) (b b) (n n) (t t))))
+  (origs (k (0 1))))
 
 (comment "Nothing left to do")
 
@@ -98,6 +103,7 @@
       (send (enc t k))))
   (label 4)
   (unrealized (0 1))
+  (origs (n (0 0)))
   (comment "1 in cohort - 1 not yet seen"))
 
 (defskeleton nslsk
@@ -116,7 +122,9 @@
   (label 5)
   (parent 4)
   (unrealized)
-  (shape))
+  (shape)
+  (maps ((0) ((b b) (n n) (a a) (k k) (t t))))
+  (origs (n (0 0))))
 
 (comment "Nothing left to do")
 
@@ -140,6 +148,7 @@
       (recv (enc "t" k))))
   (label 6)
   (unrealized (0 2))
+  (origs (k (0 1)))
   (comment "2 in cohort - 2 not yet seen"))
 
 (defskeleton nslsk-tag-term
@@ -193,7 +202,9 @@
   (label 9)
   (parent 7)
   (unrealized)
-  (shape))
+  (shape)
+  (maps ((0) ((a a) (k k) (b b) (n n))))
+  (origs (k (0 1))))
 
 (comment "Nothing left to do")
 
@@ -217,6 +228,7 @@
       (send (enc "t" k))))
   (label 10)
   (unrealized (0 1))
+  (origs (n (0 0)))
   (comment "1 in cohort - 1 not yet seen"))
 
 (defskeleton nslsk-tag-term
@@ -235,6 +247,8 @@
   (label 11)
   (parent 10)
   (unrealized)
-  (shape))
+  (shape)
+  (maps ((0) ((b b) (n n) (a a) (k k))))
+  (origs (n (0 0))))
 
 (comment "Nothing left to do")

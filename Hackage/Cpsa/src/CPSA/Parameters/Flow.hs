@@ -54,11 +54,11 @@ mapRole gen (L _ (S _ "defrole" :
 mapRole _ x = return (strip x)
 
 loadTrace :: (Algebra t p g s e c, Monad m) => [t] ->
-             [SExpr Pos] -> m [Event t p g s e c]
+             [SExpr Pos] -> m [Event t]
 loadTrace vars xs = mapM (loadEvt vars) xs
 
 loadEvt :: (Algebra t p g s e c, Monad m) => [t] ->
-          SExpr Pos -> m (Event t p g s e c)
+          SExpr Pos -> m (Event t)
 loadEvt vars (L _ [S _ "recv", t]) =
     do
       t <- loadTerm vars t

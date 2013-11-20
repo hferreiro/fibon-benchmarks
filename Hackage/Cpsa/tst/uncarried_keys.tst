@@ -1,5 +1,5 @@
-(comment "CPSA 2.1.0")
-(comment "All input read")
+(comment "CPSA 2.3.1")
+(comment "All input read from uncarried_keys.scm")
 
 (defprotocol uncarried-keys basic
   (defrole init
@@ -25,6 +25,7 @@
       (send (enc a K (pubk B))) (recv (enc a A B K))))
   (label 0)
   (unrealized (0 1) (0 3))
+  (origs (K (0 2)) (a (0 0)))
   (comment "1 in cohort - 1 not yet seen"))
 
 (defskeleton uncarried-keys
@@ -43,7 +44,27 @@
   (label 1)
   (parent 0)
   (unrealized (0 3))
-  (comment "3 in cohort - 3 not yet seen"))
+  (comment "4 in cohort - 4 not yet seen"))
+
+(defskeleton uncarried-keys
+  (vars (a text) (A B name) (K akey))
+  (defstrand init 4 (a a) (A A) (B B) (K K))
+  (defstrand resp 4 (a a) (A A) (B B) (K K))
+  (precedes ((0 0) (1 0)) ((0 2) (1 2)) ((1 1) (0 1)) ((1 3) (0 3)))
+  (non-orig (invk K) (privk B))
+  (uniq-orig a K)
+  (operation encryption-test (displaced 1 2 resp 4) (enc a A B K) (0 3))
+  (traces
+    ((send (enc "start" a A B (pubk B))) (recv (enc a A B (pubk A)))
+      (send (enc a K (pubk B))) (recv (enc a A B K)))
+    ((recv (enc "start" a A B (pubk B))) (send (enc a A B (pubk A)))
+      (recv (enc a K (pubk B))) (send (enc a A B K))))
+  (label 2)
+  (parent 1)
+  (unrealized)
+  (shape)
+  (maps ((0) ((a a) (A A) (B B) (K K))))
+  (origs (K (0 2)) (a (0 0))))
 
 (defskeleton uncarried-keys
   (vars (a text) (A B name) (K akey))
@@ -61,11 +82,12 @@
     ((recv (enc "start" a A B (pubk B))) (send (enc a A B (pubk A))))
     ((recv (enc "start" a A B (pubk B))) (send (enc a A B (pubk A)))
       (recv (enc a K (pubk B))) (send (enc a A B K))))
-  (label 2)
+  (label 3)
   (parent 1)
   (unrealized)
   (shape)
-  (comment "1 in cohort - 1 not yet seen"))
+  (maps ((0) ((a a) (A A) (B B) (K K))))
+  (origs (K (0 2)) (a (0 0))))
 
 (defskeleton uncarried-keys
   (vars (a text) (A B name))
@@ -74,16 +96,18 @@
   (precedes ((0 0) (1 0)) ((1 1) (0 1)))
   (non-orig (privk A) (privk B))
   (uniq-orig a (pubk A))
-  (operation encryption-test (added-strand resp 2) (enc a A B (pubk A))
+  (operation encryption-test (displaced 2 1 resp 2) (enc a A B (pubk A))
     (0 3))
   (traces
     ((send (enc "start" a A B (pubk B))) (recv (enc a A B (pubk A)))
       (send (enc a (pubk A) (pubk B))) (recv (enc a A B (pubk A))))
     ((recv (enc "start" a A B (pubk B))) (send (enc a A B (pubk A)))))
-  (label 3)
+  (label 4)
   (parent 1)
   (unrealized)
-  (shape))
+  (shape)
+  (maps ((0) ((a a) (A A) (B B) (K (pubk A)))))
+  (origs ((pubk A) (0 2)) (a (0 0))))
 
 (defskeleton uncarried-keys
   (vars (a text) (A B name) (K akey))
@@ -99,27 +123,9 @@
       (send (enc a K (pubk B))) (recv (enc a A B K)))
     ((recv (enc "start" a A B (pubk B))) (send (enc a A B (pubk A))))
     ((recv K) (send K)))
-  (label 4)
+  (label 5)
   (parent 1)
   (unrealized (2 0))
   (comment "empty cohort"))
-
-(defskeleton uncarried-keys
-  (vars (a text) (A B name) (K akey))
-  (defstrand init 4 (a a) (A A) (B B) (K K))
-  (defstrand resp 4 (a a) (A A) (B B) (K K))
-  (precedes ((0 0) (1 0)) ((0 2) (1 2)) ((1 1) (0 1)) ((1 3) (0 3)))
-  (non-orig (invk K) (privk B))
-  (uniq-orig a K)
-  (operation collapsed 1 2)
-  (traces
-    ((send (enc "start" a A B (pubk B))) (recv (enc a A B (pubk A)))
-      (send (enc a K (pubk B))) (recv (enc a A B K)))
-    ((recv (enc "start" a A B (pubk B))) (send (enc a A B (pubk A)))
-      (recv (enc a K (pubk B))) (send (enc a A B K))))
-  (label 5)
-  (parent 2)
-  (unrealized)
-  (shape))
 
 (comment "Nothing left to do")

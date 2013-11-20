@@ -3,7 +3,7 @@
 !#
 ;;; For an R6RS script, add an import statement.
 
-;; This program simply extracts the operation form in a preskeleton
+;; This program simply extracts the operation form in a skeleton
 ;; and prints it.
 (define (consume form)
   (let ((op (skel-assq 'operation form)))

@@ -1,5 +1,7 @@
-(comment "CPSA 2.1.0")
-(comment "All input read")
+(herald "Denning-Sacco Protocol")
+
+(comment "CPSA 2.3.1")
+(comment "All input read from denning-sacco.scm")
 
 (defprotocol denning-sacco basic
   (defrole init
@@ -34,6 +36,7 @@
          (enc a (pubk a) (privk ks)) (pubk b)))))
   (label 0)
   (unrealized (0 0))
+  (origs)
   (comment "1 in cohort - 1 not yet seen"))
 
 (defskeleton denning-sacco
@@ -88,35 +91,6 @@
   (comment "2 in cohort - 2 not yet seen"))
 
 (defskeleton denning-sacco
-  (vars (ta text) (a b ks b-0 name) (k skey))
-  (defstrand resp 1 (ta ta) (a a) (b b) (ks ks) (k k))
-  (defstrand init 3 (ta ta) (a a) (b b) (ks ks) (k k))
-  (defstrand keyserver 2 (a b) (b b-0) (ks ks))
-  (precedes ((1 2) (0 0)) ((2 1) (1 1)))
-  (non-orig (privk a) (privk b) (privk ks))
-  (uniq-orig k)
-  (operation encryption-test (added-strand keyserver 2)
-    (enc b (pubk b) (privk ks)) (1 1))
-  (traces
-    ((recv
-       (enc (enc a b k ta (privk a)) (enc b (pubk b) (privk ks))
-         (enc a (pubk a) (privk ks)) (pubk b))))
-    ((send (cat a b))
-      (recv
-        (cat (enc b (pubk b) (privk ks)) (enc a (pubk a) (privk ks))))
-      (send
-        (enc (enc a b k ta (privk a)) (enc b (pubk b) (privk ks))
-          (enc a (pubk a) (privk ks)) (pubk b))))
-    ((recv (cat b b-0))
-      (send
-        (cat (enc b-0 (pubk b-0) (privk ks))
-          (enc b (pubk b) (privk ks))))))
-  (label 3)
-  (parent 2)
-  (unrealized (1 1))
-  (comment "2 in cohort - 2 not yet seen"))
-
-(defskeleton denning-sacco
   (vars (ta text) (a b ks a-0 name) (k skey))
   (defstrand resp 1 (ta ta) (a a) (b b) (ks ks) (k k))
   (defstrand init 3 (ta ta) (a a) (b b) (ks ks) (k k))
@@ -140,22 +114,21 @@
       (send
         (cat (enc b (pubk b) (privk ks))
           (enc a-0 (pubk a-0) (privk ks))))))
-  (label 4)
+  (label 3)
   (parent 2)
   (unrealized (1 1))
-  (comment "2 in cohort - 2 not yet seen"))
+  (comment "4 in cohort - 4 not yet seen"))
 
 (defskeleton denning-sacco
-  (vars (ta text) (a b ks b-0 b-1 name) (k skey))
+  (vars (ta text) (a b ks b-0 name) (k skey))
   (defstrand resp 1 (ta ta) (a a) (b b) (ks ks) (k k))
   (defstrand init 3 (ta ta) (a a) (b b) (ks ks) (k k))
   (defstrand keyserver 2 (a b) (b b-0) (ks ks))
-  (defstrand keyserver 2 (a a) (b b-1) (ks ks))
-  (precedes ((1 2) (0 0)) ((2 1) (1 1)) ((3 1) (1 1)))
+  (precedes ((1 2) (0 0)) ((2 1) (1 1)))
   (non-orig (privk a) (privk b) (privk ks))
   (uniq-orig k)
   (operation encryption-test (added-strand keyserver 2)
-    (enc a (pubk a) (privk ks)) (1 1))
+    (enc b (pubk b) (privk ks)) (1 1))
   (traces
     ((recv
        (enc (enc a b k ta (privk a)) (enc b (pubk b) (privk ks))
@@ -169,86 +142,41 @@
     ((recv (cat b b-0))
       (send
         (cat (enc b-0 (pubk b-0) (privk ks))
-          (enc b (pubk b) (privk ks)))))
-    ((recv (cat a b-1))
+          (enc b (pubk b) (privk ks))))))
+  (label 4)
+  (parent 2)
+  (unrealized (1 1))
+  (comment "4 in cohort - 4 not yet seen"))
+
+(defskeleton denning-sacco
+  (vars (ta text) (b ks a name) (k skey))
+  (defstrand resp 1 (ta ta) (a b) (b b) (ks ks) (k k))
+  (defstrand init 3 (ta ta) (a b) (b b) (ks ks) (k k))
+  (defstrand keyserver 2 (a a) (b b) (ks ks))
+  (precedes ((1 2) (0 0)) ((2 1) (1 1)))
+  (non-orig (privk b) (privk ks))
+  (uniq-orig k)
+  (operation encryption-test (displaced 3 2 keyserver 2)
+    (enc a-0 (pubk a-0) (privk ks)) (1 1))
+  (traces
+    ((recv
+       (enc (enc b b k ta (privk b)) (enc b (pubk b) (privk ks))
+         (enc b (pubk b) (privk ks)) (pubk b))))
+    ((send (cat b b))
+      (recv
+        (cat (enc b (pubk b) (privk ks)) (enc b (pubk b) (privk ks))))
       (send
-        (cat (enc b-1 (pubk b-1) (privk ks))
-          (enc a (pubk a) (privk ks))))))
+        (enc (enc b b k ta (privk b)) (enc b (pubk b) (privk ks))
+          (enc b (pubk b) (privk ks)) (pubk b))))
+    ((recv (cat a b))
+      (send
+        (cat (enc b (pubk b) (privk ks)) (enc a (pubk a) (privk ks))))))
   (label 5)
   (parent 3)
   (unrealized)
   (shape)
-  (comment "1 in cohort - 1 not yet seen"))
-
-(defskeleton denning-sacco
-  (vars (ta text) (a b ks b-0 a-0 name) (k skey))
-  (defstrand resp 1 (ta ta) (a a) (b b) (ks ks) (k k))
-  (defstrand init 3 (ta ta) (a a) (b b) (ks ks) (k k))
-  (defstrand keyserver 2 (a b) (b b-0) (ks ks))
-  (defstrand keyserver 2 (a a-0) (b a) (ks ks))
-  (precedes ((1 2) (0 0)) ((2 1) (1 1)) ((3 1) (1 1)))
-  (non-orig (privk a) (privk b) (privk ks))
-  (uniq-orig k)
-  (operation encryption-test (added-strand keyserver 2)
-    (enc a (pubk a) (privk ks)) (1 1))
-  (traces
-    ((recv
-       (enc (enc a b k ta (privk a)) (enc b (pubk b) (privk ks))
-         (enc a (pubk a) (privk ks)) (pubk b))))
-    ((send (cat a b))
-      (recv
-        (cat (enc b (pubk b) (privk ks)) (enc a (pubk a) (privk ks))))
-      (send
-        (enc (enc a b k ta (privk a)) (enc b (pubk b) (privk ks))
-          (enc a (pubk a) (privk ks)) (pubk b))))
-    ((recv (cat b b-0))
-      (send
-        (cat (enc b-0 (pubk b-0) (privk ks))
-          (enc b (pubk b) (privk ks)))))
-    ((recv (cat a-0 a))
-      (send
-        (cat (enc a (pubk a) (privk ks))
-          (enc a-0 (pubk a-0) (privk ks))))))
-  (label 6)
-  (parent 3)
-  (unrealized)
-  (shape)
-  (comment "1 in cohort - 1 not yet seen"))
-
-(defskeleton denning-sacco
-  (vars (ta text) (a b ks a-0 b-0 name) (k skey))
-  (defstrand resp 1 (ta ta) (a a) (b b) (ks ks) (k k))
-  (defstrand init 3 (ta ta) (a a) (b b) (ks ks) (k k))
-  (defstrand keyserver 2 (a a-0) (b b) (ks ks))
-  (defstrand keyserver 2 (a a) (b b-0) (ks ks))
-  (precedes ((1 2) (0 0)) ((2 1) (1 1)) ((3 1) (1 1)))
-  (non-orig (privk a) (privk b) (privk ks))
-  (uniq-orig k)
-  (operation encryption-test (added-strand keyserver 2)
-    (enc a (pubk a) (privk ks)) (1 1))
-  (traces
-    ((recv
-       (enc (enc a b k ta (privk a)) (enc b (pubk b) (privk ks))
-         (enc a (pubk a) (privk ks)) (pubk b))))
-    ((send (cat a b))
-      (recv
-        (cat (enc b (pubk b) (privk ks)) (enc a (pubk a) (privk ks))))
-      (send
-        (enc (enc a b k ta (privk a)) (enc b (pubk b) (privk ks))
-          (enc a (pubk a) (privk ks)) (pubk b))))
-    ((recv (cat a-0 b))
-      (send
-        (cat (enc b (pubk b) (privk ks))
-          (enc a-0 (pubk a-0) (privk ks)))))
-    ((recv (cat a b-0))
-      (send
-        (cat (enc b-0 (pubk b-0) (privk ks))
-          (enc a (pubk a) (privk ks))))))
-  (label 7)
-  (parent 4)
-  (unrealized)
-  (shape)
-  (comment "1 in cohort - 1 not yet seen"))
+  (maps ((0) ((a b) (b b) (ks ks) (k k) (ta ta))))
+  (origs (k (1 2))))
 
 (defskeleton denning-sacco
   (vars (ta text) (a b ks a-0 a-1 name) (k skey))
@@ -279,39 +207,78 @@
       (send
         (cat (enc a (pubk a) (privk ks))
           (enc a-1 (pubk a-1) (privk ks))))))
-  (label 8)
-  (parent 4)
+  (label 6)
+  (parent 3)
   (unrealized)
   (shape)
-  (comment "1 in cohort - 1 not yet seen"))
+  (maps ((0) ((a a) (b b) (ks ks) (k k) (ta ta))))
+  (origs (k (1 2))))
 
 (defskeleton denning-sacco
-  (vars (ta text) (b ks b-0 name) (k skey))
-  (defstrand resp 1 (ta ta) (a b) (b b) (ks ks) (k k))
-  (defstrand init 3 (ta ta) (a b) (b b) (ks ks) (k k))
-  (defstrand keyserver 2 (a b) (b b-0) (ks ks))
+  (vars (ta text) (b ks a name) (k skey))
+  (defstrand resp 1 (ta ta) (a a) (b b) (ks ks) (k k))
+  (defstrand init 3 (ta ta) (a a) (b b) (ks ks) (k k))
+  (defstrand keyserver 2 (a a) (b b) (ks ks))
   (precedes ((1 2) (0 0)) ((2 1) (1 1)))
-  (non-orig (privk b) (privk ks))
+  (non-orig (privk b) (privk ks) (privk a))
   (uniq-orig k)
-  (operation collapsed 3 2)
+  (operation encryption-test (displaced 3 2 keyserver 2)
+    (enc a-0 (pubk a-0) (privk ks)) (1 1))
   (traces
     ((recv
-       (enc (enc b b k ta (privk b)) (enc b (pubk b) (privk ks))
-         (enc b (pubk b) (privk ks)) (pubk b))))
-    ((send (cat b b))
+       (enc (enc a b k ta (privk a)) (enc b (pubk b) (privk ks))
+         (enc a (pubk a) (privk ks)) (pubk b))))
+    ((send (cat a b))
       (recv
-        (cat (enc b (pubk b) (privk ks)) (enc b (pubk b) (privk ks))))
+        (cat (enc b (pubk b) (privk ks)) (enc a (pubk a) (privk ks))))
       (send
-        (enc (enc b b k ta (privk b)) (enc b (pubk b) (privk ks))
-          (enc b (pubk b) (privk ks)) (pubk b))))
-    ((recv (cat b b-0))
+        (enc (enc a b k ta (privk a)) (enc b (pubk b) (privk ks))
+          (enc a (pubk a) (privk ks)) (pubk b))))
+    ((recv (cat a b))
+      (send
+        (cat (enc b (pubk b) (privk ks)) (enc a (pubk a) (privk ks))))))
+  (label 7)
+  (parent 3)
+  (unrealized)
+  (shape)
+  (maps ((0) ((a a) (b b) (ks ks) (k k) (ta ta))))
+  (origs (k (1 2))))
+
+(defskeleton denning-sacco
+  (vars (ta text) (a b ks a-0 b-0 name) (k skey))
+  (defstrand resp 1 (ta ta) (a a) (b b) (ks ks) (k k))
+  (defstrand init 3 (ta ta) (a a) (b b) (ks ks) (k k))
+  (defstrand keyserver 2 (a a-0) (b b) (ks ks))
+  (defstrand keyserver 2 (a a) (b b-0) (ks ks))
+  (precedes ((1 2) (0 0)) ((2 1) (1 1)) ((3 1) (1 1)))
+  (non-orig (privk a) (privk b) (privk ks))
+  (uniq-orig k)
+  (operation encryption-test (added-strand keyserver 2)
+    (enc a (pubk a) (privk ks)) (1 1))
+  (traces
+    ((recv
+       (enc (enc a b k ta (privk a)) (enc b (pubk b) (privk ks))
+         (enc a (pubk a) (privk ks)) (pubk b))))
+    ((send (cat a b))
+      (recv
+        (cat (enc b (pubk b) (privk ks)) (enc a (pubk a) (privk ks))))
+      (send
+        (enc (enc a b k ta (privk a)) (enc b (pubk b) (privk ks))
+          (enc a (pubk a) (privk ks)) (pubk b))))
+    ((recv (cat a-0 b))
+      (send
+        (cat (enc b (pubk b) (privk ks))
+          (enc a-0 (pubk a-0) (privk ks)))))
+    ((recv (cat a b-0))
       (send
         (cat (enc b-0 (pubk b-0) (privk ks))
-          (enc b (pubk b) (privk ks))))))
-  (label 9)
-  (parent 5)
+          (enc a (pubk a) (privk ks))))))
+  (label 8)
+  (parent 3)
   (unrealized)
-  (shape))
+  (shape)
+  (maps ((0) ((a a) (b b) (ks ks) (k k) (ta ta))))
+  (origs (k (1 2))))
 
 (defskeleton denning-sacco
   (vars (ta text) (b ks b-0 name) (k skey))
@@ -321,7 +288,8 @@
   (precedes ((1 2) (0 0)) ((2 1) (1 1)))
   (non-orig (privk b) (privk ks) (privk b-0))
   (uniq-orig k)
-  (operation collapsed 3 2)
+  (operation encryption-test (displaced 3 2 keyserver 2)
+    (enc a (pubk a) (privk ks)) (1 1))
   (traces
     ((recv
        (enc (enc b-0 b k ta (privk b-0)) (enc b (pubk b) (privk ks))
@@ -337,20 +305,24 @@
       (send
         (cat (enc b-0 (pubk b-0) (privk ks))
           (enc b (pubk b) (privk ks))))))
-  (label 10)
-  (parent 6)
+  (label 9)
+  (parent 4)
   (unrealized)
-  (shape))
+  (shape)
+  (maps ((0) ((a b-0) (b b) (ks ks) (k k) (ta ta))))
+  (origs (k (1 2))))
 
 (defskeleton denning-sacco
-  (vars (ta text) (b ks a name) (k skey))
+  (vars (ta text) (a b ks b-0 a-0 name) (k skey))
   (defstrand resp 1 (ta ta) (a a) (b b) (ks ks) (k k))
   (defstrand init 3 (ta ta) (a a) (b b) (ks ks) (k k))
-  (defstrand keyserver 2 (a a) (b b) (ks ks))
-  (precedes ((1 2) (0 0)) ((2 1) (1 1)))
-  (non-orig (privk b) (privk ks) (privk a))
+  (defstrand keyserver 2 (a b) (b b-0) (ks ks))
+  (defstrand keyserver 2 (a a-0) (b a) (ks ks))
+  (precedes ((1 2) (0 0)) ((2 1) (1 1)) ((3 1) (1 1)))
+  (non-orig (privk a) (privk b) (privk ks))
   (uniq-orig k)
-  (operation collapsed 3 2)
+  (operation encryption-test (added-strand keyserver 2)
+    (enc a (pubk a) (privk ks)) (1 1))
   (traces
     ((recv
        (enc (enc a b k ta (privk a)) (enc b (pubk b) (privk ks))
@@ -361,23 +333,31 @@
       (send
         (enc (enc a b k ta (privk a)) (enc b (pubk b) (privk ks))
           (enc a (pubk a) (privk ks)) (pubk b))))
-    ((recv (cat a b))
+    ((recv (cat b b-0))
       (send
-        (cat (enc b (pubk b) (privk ks)) (enc a (pubk a) (privk ks))))))
-  (label 11)
-  (parent 7)
+        (cat (enc b-0 (pubk b-0) (privk ks))
+          (enc b (pubk b) (privk ks)))))
+    ((recv (cat a-0 a))
+      (send
+        (cat (enc a (pubk a) (privk ks))
+          (enc a-0 (pubk a-0) (privk ks))))))
+  (label 10)
+  (parent 4)
   (unrealized)
-  (shape))
+  (shape)
+  (maps ((0) ((a a) (b b) (ks ks) (k k) (ta ta))))
+  (origs (k (1 2))))
 
 (defskeleton denning-sacco
-  (vars (ta text) (b ks a name) (k skey))
+  (vars (ta text) (b ks b-0 name) (k skey))
   (defstrand resp 1 (ta ta) (a b) (b b) (ks ks) (k k))
   (defstrand init 3 (ta ta) (a b) (b b) (ks ks) (k k))
-  (defstrand keyserver 2 (a a) (b b) (ks ks))
+  (defstrand keyserver 2 (a b) (b b-0) (ks ks))
   (precedes ((1 2) (0 0)) ((2 1) (1 1)))
   (non-orig (privk b) (privk ks))
   (uniq-orig k)
-  (operation collapsed 3 2)
+  (operation encryption-test (displaced 3 2 keyserver 2)
+    (enc a (pubk a) (privk ks)) (1 1))
   (traces
     ((recv
        (enc (enc b b k ta (privk b)) (enc b (pubk b) (privk ks))
@@ -388,12 +368,51 @@
       (send
         (enc (enc b b k ta (privk b)) (enc b (pubk b) (privk ks))
           (enc b (pubk b) (privk ks)) (pubk b))))
-    ((recv (cat a b))
+    ((recv (cat b b-0))
       (send
-        (cat (enc b (pubk b) (privk ks)) (enc a (pubk a) (privk ks))))))
-  (label 12)
-  (parent 8)
+        (cat (enc b-0 (pubk b-0) (privk ks))
+          (enc b (pubk b) (privk ks))))))
+  (label 11)
+  (parent 4)
   (unrealized)
-  (shape))
+  (shape)
+  (maps ((0) ((a b) (b b) (ks ks) (k k) (ta ta))))
+  (origs (k (1 2))))
+
+(defskeleton denning-sacco
+  (vars (ta text) (a b ks b-0 b-1 name) (k skey))
+  (defstrand resp 1 (ta ta) (a a) (b b) (ks ks) (k k))
+  (defstrand init 3 (ta ta) (a a) (b b) (ks ks) (k k))
+  (defstrand keyserver 2 (a b) (b b-0) (ks ks))
+  (defstrand keyserver 2 (a a) (b b-1) (ks ks))
+  (precedes ((1 2) (0 0)) ((2 1) (1 1)) ((3 1) (1 1)))
+  (non-orig (privk a) (privk b) (privk ks))
+  (uniq-orig k)
+  (operation encryption-test (added-strand keyserver 2)
+    (enc a (pubk a) (privk ks)) (1 1))
+  (traces
+    ((recv
+       (enc (enc a b k ta (privk a)) (enc b (pubk b) (privk ks))
+         (enc a (pubk a) (privk ks)) (pubk b))))
+    ((send (cat a b))
+      (recv
+        (cat (enc b (pubk b) (privk ks)) (enc a (pubk a) (privk ks))))
+      (send
+        (enc (enc a b k ta (privk a)) (enc b (pubk b) (privk ks))
+          (enc a (pubk a) (privk ks)) (pubk b))))
+    ((recv (cat b b-0))
+      (send
+        (cat (enc b-0 (pubk b-0) (privk ks))
+          (enc b (pubk b) (privk ks)))))
+    ((recv (cat a b-1))
+      (send
+        (cat (enc b-1 (pubk b-1) (privk ks))
+          (enc a (pubk a) (privk ks))))))
+  (label 12)
+  (parent 4)
+  (unrealized)
+  (shape)
+  (maps ((0) ((a a) (b b) (ks ks) (k k) (ta ta))))
+  (origs (k (1 2))))
 
 (comment "Nothing left to do")

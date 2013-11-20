@@ -1,4 +1,4 @@
--- Protocol data structures
+-- Protocol data structures.
 
 -- Copyright (c) 2009 The MITRE Corporation
 --
@@ -8,9 +8,10 @@
 
 module CPSA.Lib.Protocol (Event (..), evtTerm, evtMap, Trace, evt,
     tterms, originates, originationPos, acquiredPos, usedPos, Role,
-    rname, rvars, rtrace, rnon, runique, rcomment, rnorig, ruorig,
-    mkRole, varSubset, varsInTerms, addVars, Prot, mkProt, pname, alg,
-    pgen, roles, pcomment, flow) where
+    rname, rvars, rtrace, rnon, rpnon, runique, rcomment,
+    rsearch, rnorig, rpnorig, ruorig, rpriority, mkRole, varSubset,
+    varsInTerms, addVars, Prot, mkProt, pname, alg, pgen, roles,
+    varsAllAtoms, pcomment, flow) where
 
 import qualified Data.List as L
 import qualified Data.Set as S
@@ -35,48 +36,45 @@ addVars ts t = foldVars (flip adjoin) ts t
 
 -- Message events and traces
 
-data Algebra t p g s e c => Event t p g s e c
+data Event t
     = In !t                      -- Inbound message
     | Out !t                     -- Outbound messasge
       deriving (Show, Eq, Ord)
 
 -- Dispatch to function based on direction.
-evt :: Algebra t p g s e c => (t -> a) -> (t -> a) ->
-       Event t p g s e c -> a
+evt :: (t -> a) -> (t -> a) -> Event t -> a
 evt inDir outDir evt =
     case evt of
       In t -> inDir t
       Out t -> outDir t
 
--- Extract the term in a directed term (evt id id).
-evtTerm :: Algebra t p g s e c => Event t p g s e c -> t
+-- Extract the term in an event (evt id id).
+evtTerm :: Event t -> t
 evtTerm (In t) = t
 evtTerm (Out t) = t
 
--- Map the term in a directed term.
-evtMap :: Algebra t p g s e c => (t -> t) ->
-          Event t p g s e c -> Event t p g s e c
+-- Map the term in an event.
+evtMap :: (t -> t) -> Event t -> Event t
 evtMap f (In t) = In (f t)
 evtMap f (Out t) = Out (f t)
 
--- A trace is a list of directed terms.  The terms in the trace are
+-- A trace is a list of events.  The terms in the trace are
 -- stored in causal order.
-type Trace t p g s e c = [Event t p g s e c]
+type Trace t = [Event t]
 
 -- The set of terms in a trace.
-tterms :: Algebra t p g s e c => Trace t p g s e c -> [t]
+tterms :: Eq t => Trace t -> [t]
 tterms c =
     foldl (\ts evt -> adjoin (evtTerm evt) ts) [] c
 
--- Is the term carried by a directed term, and is the first one outgoing?
-originates :: Algebra t p g s e c => t -> Trace t p g s e c -> Bool
+-- Is the term carried by an event, and is the first one outgoing?
+originates :: Algebra t p g s e c => t -> Trace t -> Bool
 originates _ [] = False         -- Term is not carried
 originates t (Out t' : c) = t `carriedBy` t' || originates t c
 originates t (In t' : c) = not (t `carriedBy` t') && originates t c
 
 -- At what position does a term originate in a trace?
-originationPos :: Algebra t p g s e c => t ->
-                  Trace t p g s e c -> Maybe Int
+originationPos :: Algebra t p g s e c => t -> Trace t -> Maybe Int
 originationPos t c =
     loop 0 c
     where
@@ -89,8 +87,7 @@ originationPos t c =
           | otherwise = loop (pos + 1) c
 
 -- At what position is a term acquired in a trace?
-acquiredPos :: Algebra t p g s e c => t ->
-               Trace t p g s e c -> Maybe Int
+acquiredPos :: Algebra t p g s e c => t -> Trace t -> Maybe Int
 acquiredPos t c =
     loop 0 c
     where
@@ -104,8 +101,7 @@ acquiredPos t c =
           | otherwise = loop (pos + 1) c
 
 -- At what position do all of the variables in a term occur in a trace?
-usedPos :: Algebra t p g s e c => t ->
-           Trace t p g s e c -> Maybe Int
+usedPos :: Algebra t p g s e c => t -> Trace t -> Maybe Int
 usedPos t c =
     loop 0 (varsInTerms [t]) c
     where
@@ -119,7 +115,7 @@ usedPos t c =
 -- Data flow analysis of a trace.
 
 -- Return the minimal sets of parameters computed using traceFlow
-flow :: Algebra t p g s e c => Trace t p g s e c -> [[t]]
+flow :: Algebra t p g s e c => Trace t -> [[t]]
 flow c =
     toList $ filter minimal inits
     where
@@ -133,13 +129,13 @@ flow c =
 -- terms to sets of pairs of the same sets.
 type FlowRule t = (Set t, Set t) -> Set (Set t, Set t)
 
--- Analyze directed terms in a trace sequentially
-traceFlow :: Algebra t p g s e c => Trace t p g s e c -> FlowRule t
+-- Analyze events in a trace sequentially
+traceFlow :: Algebra t p g s e c => Trace t -> FlowRule t
 traceFlow [] a = S.singleton a
 traceFlow (d : c) a = comb (traceFlow c) (evtFlow d) a
 
 -- Dispatch to algebra specific data flow routines
-evtFlow :: Algebra t p g s e c => Event t p g s e c -> FlowRule t
+evtFlow :: Algebra t p g s e c => Event t -> FlowRule t
 evtFlow (In t) = inFlow t
 evtFlow (Out t) = outFlow t
 
@@ -149,38 +145,49 @@ comb f g x =
     S.fold h S.empty (g x)
     where h a s = S.union (f a) s
 
-data Algebra t p g s e c => Role t p g s e c = Role
+data Role t = Role
     { rname :: !String,
       rvars :: ![t],            -- Set of role variables
                                 -- Events in causal order
-      rtrace :: ![Event t p g s e c],
+      rtrace :: ![Event t],
       -- Set of non-originating atoms, possibly with a trace length
       rnon :: ![(Maybe Int, t)], -- that says when to inherit the atom
+      rpnon :: ![(Maybe Int, t)], -- that says when to inherit the atom
       runique :: ![t],          -- Set of uniquely originating atoms
       rcomment :: [SExpr ()],   -- Comments from the input
+      rsearch :: Bool, -- True when suggesting reverse test node search
       rnorig :: [(t, Int)],     -- Nons plus origination position
-      ruorig :: [(t, Int)] }    -- Uniques plus origination position
+      rpnorig :: [(t, Int)], -- Penetrator nons plus origination position
+      ruorig :: [(t, Int)],     -- Uniques plus origination position
+      rpriority :: [Int] }      -- List of all priorities
     deriving Show
+
+defaultPriority :: Int
+defaultPriority = 5
 
 -- The empty role name is used with listener strands.  All roles in a
 -- protocol must have a name with more than one character.
 
--- The lists vars, non, and unique are sets and should never contain
--- duplicate terms.
+-- The lists vars, non, pnon, and unique are sets and should never
+-- contain duplicate terms.
 
 -- Create a role
-mkRole :: Algebra t p g s e c => String -> [t] ->
-          Trace t p g s e c -> [(Maybe Int, t)] -> [t] ->
-          [SExpr ()] -> Role t p g s e c
-mkRole name vars trace non unique comment =
+mkRole :: Algebra t p g s e c => String -> [t] -> Trace t ->
+          [(Maybe Int, t)] -> [(Maybe Int, t)] -> [t] ->
+          [SExpr ()] -> [(Int, Int)] -> Bool -> Role t
+mkRole name vars trace non pnon unique comment priority rev =
     Role { rname = name,
            rvars = L.nub vars,  -- Every variable here must
-           rtrace = trace,      --  occur in the trace.
+           rtrace = trace,      -- occur in the trace.
            rnon = non,
+           rpnon = pnon,
            runique = L.nub unique,
            rcomment = comment,
            rnorig = map addNonOrig $ nonNub non,
-           ruorig = map addUniqueOrig $ L.nub unique
+           rpnorig = map addNonOrig $ nonNub pnon,
+           ruorig = map addUniqueOrig $ L.nub unique,
+           rpriority = addDefaultPrio priority,
+           rsearch = rev
          }
     where
       addUniqueOrig t =
@@ -193,10 +200,10 @@ mkRole name vars trace non unique comment =
             Just p ->
                 case len of
                   Nothing -> (t, p)
-                  Just len | len > p -> (t, len - 1)
+                  Just len | len >= p -> (t, len)
                            | otherwise -> error msg
           where
-            msg = "Protocol.mkRole: Length for atom too early in trace"
+            msg = "Protocol.mkRole: Position for atom too early in trace"
       -- Drop non-origination assumptions for the same atom.
       nonNub nons =
           reverse $ foldl f [] nons
@@ -204,20 +211,31 @@ mkRole name vars trace non unique comment =
             f acc non@(_, t)
                 | any (\(_, t') -> t == t') acc = acc
                 | otherwise = non : acc
+      addDefaultPrio priority =
+          map f (nats $ length trace)
+          where
+            f n =
+              case lookup n priority of
+                Nothing -> defaultPriority
+                Just p -> p
 
 -- Protocols
 
-data Algebra t p g s e c => Prot t p g s e c
+data Prot t g
     = Prot { pname :: !String,  -- Name of the protocol
              alg :: !String,    -- Name of the algebra
              pgen :: !g,        -- Initial variable generator
-             roles :: ![Role t p g s e c],
+             roles :: ![Role t],
+             varsAllAtoms :: !Bool,   -- Are all role variables atoms?
              pcomment :: [SExpr ()] }  -- Comments from the input
     deriving Show
 
 -- Callers should ensure every role has a distinct name.
 mkProt :: Algebra t p g s e c => String -> String ->
-          g -> [Role t p g s e c] -> [SExpr ()] -> Prot t p g s e c
+          g -> [Role t] -> [SExpr ()] -> Prot t g
 mkProt name alg gen roles comment =
     Prot { pname = name, alg = alg, pgen = gen,
-           roles = roles, pcomment = comment }
+           roles = roles, pcomment = comment,
+           varsAllAtoms = all roleVarsAllAtoms roles }
+    where
+      roleVarsAllAtoms role = all isAtom (rvars role)
