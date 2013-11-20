@@ -58,15 +58,15 @@ module Codec.Compression.BZip.Stream (
 import Foreign
          ( Word8, Ptr, nullPtr, plusPtr, peekByteOff, pokeByteOff, mallocBytes
          , ForeignPtr, FinalizerPtr, newForeignPtr_, addForeignPtrFinalizer
-         , finalizeForeignPtr, withForeignPtr, touchForeignPtr
-         , unsafeForeignPtrToPtr, unsafePerformIO )
-import Foreign.C
-         ( CInt, CUInt )
-#ifdef BYTESTRING_IN_BASE
-import Data.ByteString.Base (nullForeignPtr)
+         , finalizeForeignPtr, withForeignPtr, touchForeignPtr )
+#if __GLASGOW_HASKELL__ >= 702
+import Foreign.ForeignPtr.Unsafe ( unsafeForeignPtrToPtr )
+import System.IO.Unsafe          ( unsafePerformIO )
 #else
-import Data.ByteString.Internal (nullForeignPtr)
+import Foreign ( unsafeForeignPtrToPtr, unsafePerformIO )
 #endif
+import Foreign.C
+import Data.ByteString.Internal (nullForeignPtr)
 import System.IO.Unsafe (unsafeInterleaveIO)
 import System.IO (hPutStrLn, stderr)
 import Control.Monad (liftM)

@@ -1,10 +1,10 @@
 name:            bzlib
-version:         0.5.0.0
-copyright:       (c) 2006-2008 Duncan Coutts
+version:         0.5.0.4
+copyright:       (c) 2006-2011 Duncan Coutts
 license:         BSD3
 license-file:    LICENSE
-author:          Duncan Coutts <duncan@haskell.org>
-maintainer:      Duncan Coutts <duncan@haskell.org>
+author:          Duncan Coutts <duncan@community.haskell.org>
+maintainer:      Duncan Coutts <duncan@community.haskell.org>
 category:        Codec
 synopsis:        Compression and decompression in the bzip2 format
 description:     This package provides a pure interface for compressing and 
@@ -12,32 +12,26 @@ description:     This package provides a pure interface for compressing and
                  'ByteString's. It uses the bz2 C library so it has high
                  performance.
                  .
-                 It provides a convenient high level api suitable for most
+                 It provides a convenient high level API suitable for most
                  tasks and for the few cases where more control is needed it
                  provides access to the full bzip2 feature set.
-stability:       provisional
 build-type:      Simple
-cabal-version:   >= 1.2.1
-extra-source-files: cbits/bzlib_private.h
+cabal-version:   >= 1.6
+extra-source-files: cbits/bzlib_private.h cbits/LICENSE
                     -- demo programs:
-                    bzip2.hs bunzip2.hs
+                    examples/bzip2.hs examples/bunzip2.hs
 
-flag bytestring-in-base
-  description: In the ghc-6.6 era the bytestring modules were
-               included in the base package.
+source-repository head
+  type: darcs
+  location: http://code.haskell.org/bzlib/
 
 library
-  buildable:       False
   exposed-modules: Codec.Compression.BZip,
                    Codec.Compression.BZip.Internal
   other-modules:   Codec.Compression.BZip.Stream
   extensions:      CPP, ForeignFunctionInterface
-  if flag(bytestring-in-base)
-    -- bytestring was in base-2.0 and 2.1.1
-    build-depends: base >= 2.0 && < 2.2
-    cpp-options: -DBYTESTRING_IN_BASE
-  else
-    build-depends: base < 2.0 || >= 2.2, bytestring >= 0.9
+  build-depends:   base >= 3 && < 5,
+                   bytestring == 0.9.* || == 0.10.*
   includes:        bzlib.h
   ghc-options:     -Wall
   if !os(windows)
@@ -45,7 +39,7 @@ library
     extra-libraries: bz2
   else
     -- However for the benefit of users of Windows (which does not have zlib
-    -- by default) we bundle a complete copy of the C sources of bzip2-1.0.5
+    -- by default) we bundle a complete copy of the C sources of bzip2-1.0.6
     c-sources:     cbits/blocksort.c cbits/bzlib.c cbits/compress.c
                    cbits/crctable.c cbits/decompress.c cbits/huffman.c
                    cbits/randtable.c
