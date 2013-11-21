@@ -4,13 +4,13 @@ Palindromes
 
 [Palindromes] is a package for finding palindromes in files.
 
-[Palindromes]: http://www.jeuring.net/Palindromes/
+[Palindromes]: http://www.jeuring.net/homepage/palindromes/index.html
 
 
 Features
 --------
 
-The primary features of Palindromes include:
+The primary features of [Palindromes] include:
 
 *  Linear-time algorithm for finding exact palindromes
 *  Linear-time algorithm for finding text palindromes, 
@@ -18,16 +18,22 @@ The primary features of Palindromes include:
    symbols.
 *  Linear-time algorithm for finding word palindromes,
    text palindromes surrounded by (if at all) non-letters.
+*  Linear-time algorithm for finding palindromes in DNA.
+*  Quadratic-time algorithm for finding approximate 
+   palindromes, in which a limited number of symbols
+   may be substituted by other symbols
+*  Quadratic-time algorithm for finding palindromes with
+   gaps in the center.
 
 
 Requirements
 ------------
 
-Palindromes has the following requirements:
+[Palindromes] has the following requirements:
 
-*  [GHC] version 6.8.1 or later - It has been tested with version 6.10.1.
+*  [GHC] version 6.8.1 or later - It has been tested with version 7.4.1.
 *  [Cabal] library version 1.2.1 or later - It has been tested with version 
-           1.6.0.1.
+           1.10.2.0.
 
 [GHC]: http://www.haskell.org/ghc/
 [Cabal]: http://www.haskell.org/cabal/
@@ -55,11 +61,11 @@ For more details on the general options available, refer to the [Cabal User's
 Guide].
 
 [Palindromes package]: 
-  http://hackage.haskell.org/cgi-bin/hackage-scripts/package/Palindromes
+  http://hackage.haskell.org/package/palindromes
 [cabal-install]: 
-  http://hackage.haskell.org/cgi-bin/hackage-scripts/package/cabal-install
+  http://www.haskell.org/haskellwiki/Cabal-Install
 [Cabal User's Guide]: 
-  http://www.haskell.org/cabal/release/latest/doc/users-guide/
+  http://www.haskell.org/cabal/users-guide/
 
 
 Documentation
@@ -68,9 +74,9 @@ Documentation
 The API is documented using [Haddock] and available on the [Palindromes package] 
 site.
 
-[Haddock]: http://www.haskell.org/haddock/
+[Haddock]: http://hackage.haskell.org/package/haddock
 [Palindromes package]: 
-  http://hackage.haskell.org/cgi-bin/hackage-scripts/package/Palindromes
+  http://hackage.haskell.org/package/palindromes
 
 
 Examples
@@ -109,7 +115,7 @@ Credits
 Palindromes is based on the functional program developed by [Johan Jeuring] in 
 his PhD thesis. 
 
-The current authors and maintainer of Palindromes is [Johan Jeuring].
+The current authors and maintainer of palindromes is [Johan Jeuring].
 
 [Johan Jeuring]: http://www.jeuring.net/
 

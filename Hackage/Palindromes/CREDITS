@@ -13,10 +13,12 @@ Research and code
    using suffix trees. This version was slower, and could 
    process less data than this released version.
 
-Bug reports and feature requests
+Bug reports, testing, feature requests
 --------------------------------
 
 *  Rafael Cunha de Almeida
 *  Henning Thielemann
+*  Anjana Ramnath
+*  Jennifer Hughes
 
 

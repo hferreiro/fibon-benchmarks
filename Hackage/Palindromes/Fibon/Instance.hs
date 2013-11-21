@@ -23,11 +23,11 @@ trainFiles = ["annakarenina.txt",
               "swannsway.txt" ]
 
 mkInstance Test = sharedConfig {
-        flagConfig = flgCfg {runFlags = ["-s", "small"]}
+        flagConfig = flgCfg {runFlags = ["-tlr", "small"]}
     }
 mkInstance Train = sharedConfig {
-        flagConfig = flgCfg {runFlags = ["-s"] ++ trainFiles}
+        flagConfig = flgCfg {runFlags = ["-tlr"] ++ trainFiles}
     }
 mkInstance Ref  = sharedConfig {
-        flagConfig = flgCfg {runFlags = ["-r", "120"] ++ ["-s"] ++ trainFiles}
+        flagConfig = flgCfg {runFlags = ["-r", "120"] ++ ["-tlr"] ++ trainFiles}
     }
