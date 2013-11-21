@@ -347,7 +347,7 @@ ex3 = Dfa ['a','b']
     delta 'B' 'a' = do countA
                        return 'C'
 
-    countA = State f
+    countA = state f
       where f s = ((),s+1)
 
 runAccept dfa str = runState (dfaaccept dfa str) 0
@@ -436,10 +436,10 @@ ex_int = Dfa ['+','-','d']
     delta 3 'd' = do accumD
                      return 3
 
-    accumM = State f
+    accumM = state f
       where f s = (s,'-':s)
 
-    accumD = State f
+    accumD = state f
       where f s = (s,'d':s)
 
 
@@ -484,10 +484,10 @@ ex6 = Dfa ['+','-','1','2',' ']
 
     delta _ _ = return 5                      -- To complete the DFA
 
-    accum x = State f
+    accum x = state f
       where f s = ((),((fst s)++[x],snd s))
 
-    convert = State f
+    convert = state f
       where f s = ((),(fst s,(read (fst s))::Int))
 
 
@@ -551,16 +551,16 @@ te = Dfa ['A','x','1','0',' ']
     delta _ _ = return 20
 
 
-    accum x = State f
+    accum x = state f
       where f s = ((),((fst s)++[x],snd s))
 
-    init = State f
+    init = state f
       where f s = ((),("",snd s))
 
-    open = State f
+    open = state f
       where f s = ((),(fst s,(snd s) ++ [Open (fst s)]))
 
-    locate = State f
+    locate = state f
       where f s = ((),(fst s,(snd s) ++ [Locate (read (fst s))]))
 
 

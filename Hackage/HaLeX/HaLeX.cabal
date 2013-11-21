@@ -1,5 +1,5 @@
 name:                HaLeX
-version:             1.1.1
+version:             1.2
 synopsis:            HaLeX enables modelling, manipulation and animation of regular languages
 description:         This library was developed in the context of a programming methodology course for
                      undergraduate students, and as a consequence, it was defined mainly for educational purposes.
@@ -22,10 +22,10 @@ extra-source-files:  scripts/Make_Animation, scripts/faAnim.lefty, example/real,
                      example/real_ndfa.hs, example/GenMDfa.hs
 Library
         buildable:              False
-        build-depends:          base >3 && <= 5, mtl
+        build-depends:          base>4 && <5, mtl
         extensions:             FlexibleContexts, FlexibleInstances, MultiParamTypeClasses
 
-        ghc-options:         
+        ghc-options:          -Wall
         ghc-prof-options:    -prof -auto-all
 
         hs-source-dirs:         HaLeX_lib
@@ -38,7 +38,7 @@ Library
 Executable HaLex
            main-is:             halex.hs
            hs-source-dirs:      HaLeX_tool, HaLeX_lib, ../../../../../tools/fibon-run
-           build-depends:       base >3 && <= 5, deepseq
+           build-depends:       base >4 && <= 5, deepseq
 
-           ghc-options:         
+           ghc-options:          -Wall
            ghc-prof-options:    -prof -auto-all
