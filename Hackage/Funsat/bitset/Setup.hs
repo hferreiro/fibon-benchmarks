@@ -1,3 +1,5 @@
+#!/usr/bin/env runhaskell
+
 {-# LANGUAGE NamedFieldPuns #-}
 {-# OPTIONS_GHC -Wall -Werror #-}
 
@@ -26,11 +28,11 @@ main = defaultMainWithHooks
     mkDerivedGmpConstants pkg_descr lbi userHooks flags =
         case lookupProgram gccProgram (withPrograms lbi) of
             Just gcc ->
-                let path = "bitset/src" </> exeName in do
+                let path = "src" </> exeName in do
                     runProgram silent gcc
-                        ["bitset/bin" </> "mkDerivedGmpConstants.c", "-o", path]
+                        ["bin" </> "mkDerivedGmpConstants.c", "-o", path]
                     output <- rawSystemStdout silent path []
-                    writeFile ("bitset/cbits" </> "GmpDerivedConstants.h") output
+                    writeFile ("cbits" </> "GmpDerivedConstants.h") output
                     removeFile path
                     buildHook simpleUserHooks pkg_descr lbi userHooks flags
             Nothing -> die "Failed to find GCC!"

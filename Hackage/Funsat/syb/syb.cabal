@@ -1,8 +1,8 @@
 name:                 syb
-version:              0.3.2
+version:              0.4.1
 license:              BSD3
 license-file:         LICENSE
-author:               Ralf Lammel, Simon Peyton Jones
+author:               Ralf Lammel, Simon Peyton Jones, Jose Pedro Magalhaes
 maintainer:           generics@haskell.org
 homepage:             http://www.cs.uu.nl/wiki/GenericProgramming/SYB
 bug-reports:          http://code.google.com/p/scrapyourboilerplate/issues/list
@@ -17,16 +17,19 @@ description:
 
 category:               Generics
 stability:              provisional
-build-type:             Custom
-cabal-version:          >= 1.6
-tested-with:            GHC == 6.10.4, GHC == 6.12.3, GHC == 7.0.1
+build-type:             Simple
+cabal-version:          >= 1.8
 
 extra-source-files:     tests/*.hs,
                         README
 
-Library {
+source-repository head
+  type:                 git
+  location:             https://github.com/dreixel/syb
+
+Library
   hs-source-dirs:         src
-  build-depends:          base >= 4.0 && < 4.4
+  build-depends:          base >= 4.0 && < 5.0
   exposed-modules:        Data.Generics,
                           Data.Generics.Basics,
                           Data.Generics.Instances,
@@ -45,10 +48,17 @@ Library {
                           Generics.SYB.Twins,
                           Generics.SYB.Builders
 
-  extensions:             CPP, Rank2Types, ScopedTypeVariables
-
   if impl(ghc < 6.12) 
     ghc-options:          -package-name syb
   
   ghc-options:            -Wall
-}
+
+test-suite unit-tests
+  type:                   exitcode-stdio-1.0
+  hs-source-dirs:         tests
+  main-is:                Main.hs
+  build-depends:          base
+                        , syb
+                        , HUnit
+                        , containers
+                        , mtl

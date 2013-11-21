@@ -1,5 +1,4 @@
-{-# OPTIONS_GHC -cpp                  #-}
-
+{-# LANGUAGE CPP #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Data.Generics.Text
@@ -11,8 +10,8 @@
 -- Portability :  non-portable (uses Data.Generics.Basics)
 --
 -- \"Scrap your boilerplate\" --- Generic programming in Haskell 
--- See <http://www.cs.vu.nl/boilerplate/>. The present module provides
--- generic operations for text serialisation of terms.
+-- See <http://www.cs.uu.nl/wiki/GenericProgramming/SYB>. The present module
+-- provides generic operations for text serialisation of terms.
 --
 -----------------------------------------------------------------------------
 

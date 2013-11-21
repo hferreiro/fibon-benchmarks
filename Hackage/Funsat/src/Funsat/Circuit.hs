@@ -5,11 +5,6 @@
 -- class and various representations that admit efficient conversion to funsat
 -- CNF.
 --
--- The types in this class are more capable than simply being able to go from
--- (for example) an equality constraint to the CNF representation.  In
--- particular, the `Shared' circuit type efficiently shares subterms,
--- potentially drastically reducing the memory require for the circuit.
---
 -- The implementation for this module was adapted from
 -- <http://okmij.org/ftp/Haskell/DSLSharing.hs>.
 module Funsat.Circuit
@@ -83,8 +78,7 @@ import Data.Map( Map )
 import Data.Maybe()
 import Data.Ord()
 import Data.Set( Set )
-import Funsat.Types( CNF(..), Lit(..), Var(..), var, lit, Solution(..), litSign )
-import Funsat.Utils( litAssignment )
+import Funsat.Types( CNF(..), Lit(..), Var(..), var, lit, Solution(..), litSign, litAssignment )
 import Prelude hiding( not, and, or )
 
 import qualified Data.Bimap as Bimap

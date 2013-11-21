@@ -1,3 +1,18 @@
+{-# LANGUAGE MultiParamTypeClasses
+            ,FunctionalDependencies
+            ,FlexibleInstances
+            ,FlexibleContexts
+            ,GeneralizedNewtypeDeriving
+            ,TypeSynonymInstances
+            ,TypeOperators
+            ,ParallelListComp
+            ,BangPatterns
+ #-}
+{-# OPTIONS -cpp #-}
+
+
+
+
 
 
 {-|
@@ -78,7 +93,6 @@ import Control.Monad.State.Lazy hiding ( (>=>), forM_ )
 import Data.Array.ST
 import Data.Array.Unboxed
 import Data.Foldable hiding ( sequence_ )
-import Data.Graph.Inductive.Tree
 import Data.Int( Int64 )
 import Data.List( nub, tails, sortBy, sort )
 import Data.Maybe
@@ -88,7 +102,6 @@ import Data.Sequence( Seq )
 -- import Debug.Trace (trace)
 import Funsat.Monad
 import Funsat.Utils
-import Funsat.Utils.Internal
 import Funsat.Resolution( ResolutionTrace(..), initResolutionTrace )
 import Funsat.Types
 import Funsat.Types.Internal
@@ -144,14 +157,14 @@ solve cfg fIn =
 
       -- Watch each clause, making sure to bork if we find a contradiction.
       (`catchError`
-       (const $ funFreeze m >>= \a -> return (a,True))) $ do
+       (const $ liftST (unsafeFreezeAss m) >>= \a -> return (a,True))) $ do
           forM_ (clauses f)
             (\c -> do cid <- nextTraceId
                       isConsistent <- watchClause m (c, cid) False
                       when (not isConsistent)
                         -- conflict data is ignored here, so safe to fake
                         (do traceClauseId cid ; throwError (L 0, [], 0)))
-          a <- funFreeze m
+          a <- liftST (unsafeFreezeAss m)
           return (a, False)
 
 
@@ -184,12 +197,12 @@ stepToSolution assignment = do
         s{ dpllConfig = c{ configRestart = ceiling (configRestartBump c
                                                    * fromIntegral (configRestart c))
                            } }
-      lvl <- gets level >>= funFreeze
+      lvl :: FrozenLevelArray <- gets level >>= liftST . unsafeFreeze
       undoneLits <- takeWhile (\l -> lvl ! (var l) > 0) `liftM` gets trail
       forM_ undoneLits $ const (undoOne m)
       modify $ \s -> s{ dl = [], propQ = Seq.empty }
       compactDB
-      funFreeze m >>= simplifyDB
+      unsafeFreezeAss m >>= simplifyDB
 
 reportSolution :: Solution -> FunMonad s (Solution, Stats, Maybe ResolutionTrace)
 reportSolution s = do
@@ -212,10 +225,9 @@ reportSolution s = do
 --  * restarts to be enabled
 defaultConfig :: FunsatConfig
 defaultConfig = Cfg { configRestart = 100 -- fromIntegral $ max (numVars f `div` 10) 100
-                    , configRestartBump = 1.5
-                    , configUseVSIDS = True
-                    , configUseRestarts = True
-                    , configCut = FirstUipCut }
+                      , configRestartBump = 1.5
+                      , configUseVSIDS = True
+                      , configUseRestarts = True }
 
 -- * Preprocessing
 
@@ -254,13 +266,13 @@ simplifyDB mFr = do
 -- new state.
 solveStep :: MAssignment s -> FunMonad s (Either (MAssignment s) Solution)
 solveStep m = do
-    funFreeze m >>= solveStepInvariants
+    unsafeFreezeAss m >>= solveStepInvariants
     conf <- gets dpllConfig
     let selector = if configUseVSIDS conf then select else selectStatic
     maybeConfl <- bcp m
-    mFr   <- funFreeze m
+    mFr   <- unsafeFreezeAss m
     voArr <- gets (varOrderArr . varOrder)
-    voFr  <- FrozenVarOrder `liftM` funFreeze voArr
+    voFr  <- FrozenVarOrder `liftM` liftST (unsafeFreeze voArr)
     s     <- get
     stepForward $ 
           -- Check if unsat.
@@ -271,11 +283,11 @@ solveStep m = do
        >< selector mFr voFr  >=> decide m
     where
       -- Take the step chosen by the transition guards above.
-      stepForward Nothing     = (Right . Sat) `liftM` funFreeze m
+      stepForward Nothing     = (Right . Sat) `liftM` unsafeFreezeAss m
       stepForward (Just step) = do
           r <- step
           case r of
-            Nothing -> (Right . Unsat) `liftM` funFreeze m
+            Nothing -> (Right . Unsat) `liftM` liftST (unsafeFreezeAss m)
             Just m  -> return . Left $ m
 
 -- | /Precondition:/ problem determined to be unsat.
@@ -344,7 +356,7 @@ bcpLit m l = do
     {-# INLINE updateWatches #-}
     updateWatches _ [] = return ()
     updateWatches alter (annCl@(watchRef, c, cid) : restClauses) = do
-      mFr :: IAssignment <- funFreeze m
+      mFr <- unsafeFreezeAss m
       q   <- liftST $ do (x, y) <- readSTRef watchRef
                          return $ if x == l then y else x
       -- l,q are the (negated) literals being watched for clause c.
@@ -410,8 +422,8 @@ decide m v = do
 
 -- *** Backtracking
 
--- | The current returns the learned clause implied by the first unique
--- implication point cut of the conflict graph.
+-- | Non-chronological backtracking.  The current returns the learned clause
+-- implied by the first unique implication point cut of the conflict graph.
 backJump :: MAssignment s
          -> (Lit, Clause, ClauseId)
             -- ^ @(l, c)@, where attempting to assign @l@ conflicted with
@@ -425,42 +437,55 @@ backJump m c@(_, _conflict, _) = get >>= \(SC{dl=dl, reason=_reason}) -> do
 --          ++ "reason: " ++ Map.showTree _reason
 --           ) (
     incNumConfl ; incNumConflTotal
-    levelArr <- do s <- get
-                   funFreeze (level s)
-    (learntCl, learntClId, newLevel) <- analyse m levelArr dl c
+    levelArr :: FrozenLevelArray <- do s <- get
+                                       liftST $ unsafeFreeze (level s)
+    (learntCl, learntClId, newLevel) <-
+        do mFr <- unsafeFreezeAss m
+           analyse mFr levelArr dl c
     s <- get
     let numDecisionsToUndo = length dl - newLevel
         dl' = drop numDecisionsToUndo dl
         undoneLits = takeWhile (\lit -> levelArr ! (var lit) > newLevel) (trail s) 
     forM_ undoneLits $ const (undoOne m) -- backtrack
-    mFr <- funFreeze m
+    mFr <- unsafeFreezeAss m
     assert (numDecisionsToUndo > 0) $
      assert (not (null learntCl)) $
      assert (learntCl `isUnitUnder` mFr) $
      modify $ \s -> s{ dl  = dl' } -- undo decisions
+    mFr <- unsafeFreezeAss m
 --     trace ("new mFr: " ++ showAssignment mFr) $ return ()
     -- TODO once I'm sure this works I don't need getUnit, I can just use the
     -- uip of the cut.
     watchClause m (learntCl, learntClId) True
-    mFr <- funFreeze m
     enqueue m (getUnit learntCl mFr) (Just (learntCl, learntClId))
       -- learntCl is asserting
     return $ Just m
+
 
+
+-- | @doWhile cmd test@ first runs @cmd@, then loops testing @test@ and
+-- executing @cmd@.  The traditional @do-while@ semantics, in other words.
+doWhile :: (Monad m) => m () -> m Bool -> m ()
+doWhile body test = do
+  body
+  shouldContinue <- test
+  when shouldContinue $ doWhile body test
 
 -- | Analyse a the conflict graph and produce a learned clause.  We use the
 -- First UIP cut of the conflict graph.
 --
 -- May undo part of the trail, but not past the current decision level.
-analyse :: MAssignment s -> FrozenLevelArray -> [Lit] -> (Lit, Clause, ClauseId)
+analyse :: IAssignment -> FrozenLevelArray -> [Lit] -> (Lit, Clause, ClauseId)
         -> FunMonad s (Clause, ClauseId, Int)
            -- ^ learned clause and new decision level
-analyse m levelArr dlits (cLit, cClause, cCid) = do
-    conf <- gets dpllConfig
-    mFr  <- funFreeze m
-    st   <- get
-    -- let conflGraph = mkConflGraph mFr levelArr (reason st) dlits (cLit, cClause)
-    --                  :: ConflictGraph Gr
+analyse mFr levelArr dlits (cLit, cClause, cCid) = do
+    st <- get
+--     trace ("mFr: " ++ showAssignment mFr) $ assert True (return ())
+--     let (learntCl, newLevel) = cutLearn mFr levelArr firstUIPCut
+--         firstUIPCut = uipCut dlits levelArr conflGraph (unLit cLit)
+--                       (firstUIP conflGraph)
+--         conflGraph = mkConflGraph mFr levelArr (reason st) dlits c
+--                      :: Gr CGNodeAnnot ()
 --     trace ("graphviz graph:\n" ++ graphviz' conflGraph) $ return ()
 --     trace ("cut: " ++ show firstUIPCut) $ return ()
 --     trace ("topSort: " ++ show topSortNodes) $ return ()
@@ -468,11 +493,9 @@ analyse m levelArr dlits (cLit, cClause, cCid) = do
 --     trace ("learnt: " ++ show (map (\l -> (l, levelArr!(var l))) learntCl, newLevel)) $ return ()
 --     outputConflict "conflict.dot" (graphviz' conflGraph) $ return ()
 --     return $ (learntCl, newLevel)
-    a <- case configCut conf of
-           FirstUipCut -> firstUIPBFS m (numVars . cnf $ st) (reason st)
-           DecisionLitCut -> error "decisionlitcut unimplemented"
-               -- let lastDecision = fromMaybe $ find (\
---     trace ("learned: " ++ show a) $ return ()
+    m <- liftST $ unsafeThawAss mFr
+    a <- firstUIPBFS m (numVars . cnf $ st) (reason st)
+--     trace ("firstUIPBFS learned: " ++ show a) $ return ()
     return a
   where
     -- BFS by undoing the trail backward.  From Minisat paper.  Returns
@@ -670,7 +693,7 @@ enqueue :: MAssignment s
 {-# INLINE enqueue #-}
 -- enqueue _m l _r | trace ("enqueue " ++ show l) $ False = undefined
 enqueue m l r = do
-    mFr <- funFreeze m
+    mFr <- unsafeFreezeAss m
     case l `statusUnder` mFr of
       Right b -> return b         -- conflict/already assigned
       Left () -> do
@@ -863,7 +886,7 @@ statTable s =
                    , [WrapString "Num. Learned Clauses"
                      ,WrapString $ show (statsNumLearnt s)]
                    , [WrapString " --> Avg. Lits/Clause"
-                     ,WrapString $ printf "%.2f" (statsAvgLearntLen s)]
+                     ,WrapString $ show (statsAvgLearntLen s)]
                    , [WrapString "Num. Decisions"
                      ,WrapString $ show (statsNumDecisions s)]
                    , [WrapString "Num. Propagations"
@@ -882,7 +905,7 @@ statSummary s =
 extractStats :: FunMonad s Stats
 extractStats = do
   s <- gets stats
-  learntArr <- get >>= funFreeze . learnt
+  learntArr <- get >>= liftST . unsafeFreezeWatchArray . learnt
   let learnts = (nub . Fl.concat)
         [ map (sort . (\(_,c,_) -> c)) (learntArr!i)
         | i <- (range . bounds) learntArr ] :: [Clause]
@@ -896,6 +919,9 @@ extractStats = do
               , statsNumDecisions = numDecisions s
               , statsNumImpl = numImpl s }
   return stats
+
+unsafeFreezeWatchArray :: WatchArray s -> ST s (Array Lit [WatchedPair s])
+unsafeFreezeWatchArray = freeze
 
 
 constructResTrace :: Solution -> FunMonad s ResolutionTrace

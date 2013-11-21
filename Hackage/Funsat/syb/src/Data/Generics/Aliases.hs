@@ -1,6 +1,4 @@
-{-# OPTIONS_GHC -cpp                  #-}
-{-# LANGUAGE Rank2Types               #-}
-
+{-# LANGUAGE RankNTypes, CPP #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Data.Generics.Aliases
@@ -12,9 +10,9 @@
 -- Portability :  non-portable (local universal quantification)
 --
 -- \"Scrap your boilerplate\" --- Generic programming in Haskell 
--- See <http://www.cs.vu.nl/boilerplate/>. The present module provides
--- a number of declarations for typical generic function types,
--- corresponding type case, and others.
+-- See <http://www.cs.uu.nl/wiki/GenericProgramming/SYB>.
+-- The present module provides a number of declarations for typical generic
+-- function types, corresponding type case, and others.
 --
 -----------------------------------------------------------------------------
 
@@ -314,6 +312,11 @@ recoverQ r f = f `choiceQ` const (return r)
 ------------------------------------------------------------------------------
 --      Type extension for unary type constructors
 ------------------------------------------------------------------------------
+
+#if __GLASGOW_HASKELL__ >= 707
+#define Typeable1 Typeable
+#define Typeable2 Typeable
+#endif
 
 -- | Flexible type extension
 ext1 :: (Data a, Typeable1 t)

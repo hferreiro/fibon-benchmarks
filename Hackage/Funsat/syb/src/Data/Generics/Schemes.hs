@@ -1,7 +1,4 @@
-{-# OPTIONS_GHC -cpp                  #-}
-{-# LANGUAGE Rank2Types               #-}
-{-# LANGUAGE ScopedTypeVariables      #-}
-
+{-# LANGUAGE RankNTypes, ScopedTypeVariables, CPP #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Data.Generics.Schemes
@@ -13,8 +10,8 @@
 -- Portability :  non-portable (local universal quantification)
 --
 -- \"Scrap your boilerplate\" --- Generic programming in Haskell 
--- See <http://www.cs.vu.nl/boilerplate/>. The present module provides
--- frequently used generic traversal schemes.
+-- See <http://www.cs.uu.nl/wiki/GenericProgramming/SYB>. The present module
+-- provides frequently used generic traversal schemes.
 --
 -----------------------------------------------------------------------------
 
@@ -27,6 +24,7 @@ module Data.Generics.Schemes (
         somewhere,
         everything,
         everythingBut,
+        everythingWithContext,
         listify,
         something,
         synthesize,
@@ -111,6 +109,13 @@ everythingBut k f x = let (v, stop) = f x
                       in if stop
                            then v
                            else foldl k v (gmapQ (everythingBut k f) x)
+
+-- | Summarise all nodes in top-down, left-to-right order, carrying some state
+-- down the tree during the computation, but not left-to-right to siblings.
+everythingWithContext :: s -> (r -> r -> r) -> GenericQ (s -> (r, s)) -> GenericQ r
+everythingWithContext s0 f q x =
+  foldl f r (gmapQ (everythingWithContext s' f q) x)
+    where (r, s') = q x s0
 
 -- | Get a list of all entities that meet a predicate
 listify :: Typeable r => (r -> Bool) -> GenericQ [r]
