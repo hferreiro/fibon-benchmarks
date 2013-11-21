@@ -12,22 +12,24 @@
 -- parsing CF grammars and converting them to GF
 -----------------------------------------------------------------------------
 
-module GF.Grammar.CF (getCF) where
+module GF.Grammar.CF (getCF,CFItem,CFCat,CFFun,cf2gf,CFRule) where
 
 import GF.Grammar.Grammar
 import GF.Grammar.Macros
 import GF.Infra.Ident
-import GF.Infra.Modules
 import GF.Infra.Option
+import GF.Infra.UseIO
 
 import GF.Data.Operations
+import GF.Data.Utilities (nub')
 
 import Data.Char
 import Data.List
 import qualified Data.ByteString.Char8 as BS
+import System.FilePath
 
-getCF :: String -> String -> Err SourceGrammar
-getCF name = fmap (cf2gf name) . pCF
+getCF :: FilePath -> String -> Err SourceGrammar
+getCF fpath = fmap (cf2gf fpath) . pCF
 
 ---------------------
 -- the parser -------
@@ -50,9 +52,9 @@ getCFRule :: String -> Err [CFRule]
 getCFRule s = getcf (wrds s) where
   getcf ws = case ws of
     fun : cat : a : its | isArrow a -> 
-      Ok [L (0,0) (init fun, (cat, map mkIt its))]
+      Ok [L NoLoc (init fun, (cat, map mkIt its))]
     cat : a : its | isArrow a -> 
-      Ok [L (0,0) (mkFun cat it, (cat, map mkIt it)) | it <- chunk its]
+      Ok [L NoLoc (mkFun cat it, (cat, map mkIt it)) | it <- chunk its]
     _ -> Bad (" invalid rule:" +++ s)
   isArrow a = elem a ["->", "::="] 
   mkIt w = case w of
@@ -80,13 +82,13 @@ type CFFun = String
 -- the compiler ----------
 --------------------------
 
-cf2gf :: String -> CF -> SourceGrammar
-cf2gf name cf = MGrammar [
-  (aname, addFlag (modifyFlags (\fs -> fs{optStartCat = Just cat}))
-          (emptyModInfo{mtype = MTAbstract,       jments = abs})),
-  (cname, emptyModInfo{mtype = MTConcrete aname, jments = cnc})
+cf2gf :: FilePath -> CF -> SourceGrammar
+cf2gf fpath cf = mGrammar [
+  (aname, ModInfo MTAbstract MSComplete (modifyFlags (\fs -> fs{optStartCat = Just cat})) [] Nothing [] [] fpath Nothing abs),
+  (cname, ModInfo (MTConcrete aname) MSComplete noOptions [] Nothing [] [] fpath Nothing cnc)
   ]
  where
+   name = justModuleName fpath
    (abs,cnc,cat) = cf2grammar cf
    aname = identS $ name ++ "Abs"
    cname = identS name
@@ -99,9 +101,9 @@ cf2grammar rules = (buildTree abs, buildTree conc, cat) where
   cat   = case rules of
             (L _ (_,(c,_))):_ -> c  -- the value category of the first rule
             _ -> error "empty CF" 
-  cats  = [(cat, AbsCat (Just (L (0,0) []))) | 
-             cat <- nub (concat (map cf2cat rules))] ----notPredef cat
-  lincats = [(cat, CncCat (Just (L loc defLinType)) Nothing Nothing) | (cat,AbsCat (Just (L loc _))) <- cats]
+  cats  = [(cat, AbsCat (Just (L NoLoc []))) | 
+             cat <- nub' (concat (map cf2cat rules))] ----notPredef cat
+  lincats = [(cat, CncCat (Just (L loc defLinType)) Nothing Nothing Nothing) | (cat,AbsCat (Just (L loc _))) <- cats]
   (funs,lins) = unzip (map cf2rule rules)
 
 cf2cat :: CFRule -> [Ident]
@@ -110,7 +112,7 @@ cf2cat (L loc (_,(cat, items))) = map identS $ cat : [c | Left c <- items]
 cf2rule :: CFRule -> ((Ident,Info),(Ident,Info))
 cf2rule (L loc (fun, (cat, items))) = (def,ldef) where
   f     = identS fun
-  def   = (f, AbsFun (Just (L loc (mkProd args' (Cn (identS cat)) []))) Nothing Nothing)
+  def   = (f, AbsFun (Just (L loc (mkProd args' (Cn (identS cat)) []))) Nothing Nothing (Just True))
   args0 = zip (map (identS . ("x" ++) . show) [0..]) items
   args  = [((Explicit,v), Cn (identS c)) | (v, Left c) <- args0]
   args' = [(Explicit,identS "_", Cn (identS c)) | (_, Left c) <- args0]
@@ -118,6 +120,7 @@ cf2rule (L loc (fun, (cat, items))) = (def,ldef) where
                Nothing 
                (Just (L loc (mkAbs (map fst args) 
                       (mkRecord (const theLinLabel) [foldconcat (map mkIt args0)]))))
+               Nothing
                Nothing)
   mkIt (v, Left _) = P (Vr v) theLinLabel
   mkIt (_, Right a) = K a

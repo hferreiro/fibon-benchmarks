@@ -37,7 +37,7 @@ pgfToCFG pgf lang = mkCFG (showCId (lookStartCat pgf)) extCats (startRules ++ co
     cnc = lookConcr pgf lang
 
     rules :: [(FId,Production)]
-    rules = [(fcat,prod) | (fcat,set) <- IntMap.toList (PGF.pproductions cnc)
+    rules = [(fcat,prod) | (fcat,set) <- IntMap.toList (PGF.productions cnc)
                          , prod <- Set.toList set]
 
     fcatCats :: Map FId Cat
@@ -58,7 +58,7 @@ pgfToCFG pgf lang = mkCFG (showCId (lookStartCat pgf)) extCats (startRules ++ co
 
     topdownRules cat = f cat []
       where
-        f cat rules = maybe rules (Set.fold g rules) (IntMap.lookup cat (pproductions cnc))
+        f cat rules = maybe rules (Set.fold g rules) (IntMap.lookup cat (productions cnc))
 	 
         g (PApply funid args) rules = (cncfuns cnc ! funid,args) : rules
         g (PCoerce cat)       rules = f cat rules
@@ -70,7 +70,7 @@ pgfToCFG pgf lang = mkCFG (showCId (lookStartCat pgf)) extCats (startRules ++ co
     startRules :: [CFRule]
     startRules = [CFRule (showCId c) [NonTerminal (fcatToCat fc r)] (CFRes 0) 
                       | (c,CncCat s e lbls) <- Map.toList (cnccats cnc), 
-                        fc <- range (s,e), not (isLiteralFCat fc),
+                        fc <- range (s,e), not (isPredefFId fc),
                         r <- [0..catLinArity fc-1]]
 
     ruleToCFRule :: (FId,Production) -> [CFRule]
@@ -86,15 +86,16 @@ pgfToCFG pgf lang = mkCFG (showCId (lookStartCat pgf)) extCats (startRules ++ co
         mkRhs = concatMap symbolToCFSymbol . Array.elems
 
         containsLiterals :: Array DotPos Symbol -> Bool
-        containsLiterals row = any isLiteralFCat [args!!n | SymCat n _ <- Array.elems row] ||
-                               not (null [n | SymLit n _ <- Array.elems row])   -- only this is needed for PMCFG.
-                                                                                -- The first line is for backward compat.
+        containsLiterals row = not (null ([n | SymLit n _ <- Array.elems row] ++
+                                          [n | SymVar n _ <- Array.elems row]))
 
         symbolToCFSymbol :: Symbol -> [CFSymbol]
-        symbolToCFSymbol (SymCat n l)    = [NonTerminal (fcatToCat (args!!n) l)]
-        symbolToCFSymbol (SymLit n l)    = [NonTerminal (fcatToCat (args!!n) l)]
+        symbolToCFSymbol (SymCat n l)    = [let PArg _ fid = args!!n in NonTerminal (fcatToCat fid l)]
         symbolToCFSymbol (SymKS ts)      = map Terminal ts
-
+        symbolToCFSymbol (SymKP ts as)   = map Terminal $ ts 
+                                           ---- ++ [t | Alt ss _ <- as, t <- ss]
+                                           ---- should be alternatives in [[CFSymbol]]
+                                           ---- AR 3/6/2010
         fixProfile :: Array DotPos Symbol -> Int -> Profile
         fixProfile row i = [k | (k,j) <- nts, j == i]
             where
@@ -106,7 +107,7 @@ pgfToCFG pgf lang = mkCFG (showCId (lookStartCat pgf)) extCats (startRules ++ co
 
         profilesToTerm :: [Profile] -> CFTerm
         profilesToTerm ps = CFObj f (zipWith profileToTerm argTypes ps)
-            where (argTypes,_) = catSkeleton $ lookType pgf f
+            where (argTypes,_) = catSkeleton $ lookType (abstract pgf) f
 
         profileToTerm :: CId -> Profile -> CFTerm
         profileToTerm t [] = CFMeta t

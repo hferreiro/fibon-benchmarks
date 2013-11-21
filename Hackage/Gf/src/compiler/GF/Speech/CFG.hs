@@ -7,7 +7,7 @@
 module GF.Speech.CFG where
 
 import GF.Data.Utilities
-import PGF.CId
+import PGF
 import GF.Infra.Option
 import GF.Data.Relation
 
@@ -27,7 +27,6 @@ import qualified Data.Set as Set
 --
 
 type Cat = String
-type Token = String
 
 data Symbol c t = NonTerminal c | Terminal t
   deriving (Eq, Ord, Show)

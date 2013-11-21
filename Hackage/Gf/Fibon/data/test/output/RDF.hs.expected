@@ -1,13 +1,14 @@
 module RDF where
 
-import PGF
+import PGF hiding (Tree)
+import qualified PGF
 ----------------------------------------------------
 -- automatic translation from GF to Haskell
 ----------------------------------------------------
 
 class Gf a where
-  gf :: a -> Tree
-  fg :: Tree -> a
+  gf :: a -> PGF.Tree
+  fg :: PGF.Tree -> a
 
 newtype GString = GString String  deriving Show
 
@@ -108,6 +109,12 @@ data GValue =
  | Gres GClass GResource 
   deriving Show
 
+data GDataType
+
+data GInheritance
+
+data GProperty
+
 
 instance Gf GAttribute where
   gf (Gassign x1 x2 x3 x4 x5) = mkApp (mkCId "assign") [gf x1, gf x2, gf x3, gf x4, gf x5]
@@ -189,9 +196,10 @@ instance Gf GListAttribute where
   gf (GListAttribute [x1,x2]) = mkApp (mkCId "BaseAttribute") [gf x1, gf x2]
   gf (GListAttribute (x:xs)) = mkApp (mkCId "ConsAttribute") [gf x, gf (GListAttribute xs)]
   fg t =
-    case unApp t of
-      Just (i,[x1,x2]) | i == mkCId "BaseAttribute" -> GListAttribute [fg x1, fg x2]
-      Just (i,[x1,x2,x3,x4]) | i == mkCId "ConsAttribute" -> let GListAttribute xs = fg x4 in GListAttribute (fg x1:fg x2:fg x3:xs)
+    GListAttribute (fgs t) where
+     fgs t = case unApp t of
+      Just (i,[x1,x2]) | i == mkCId "BaseAttribute" -> [fg x1, fg x2]
+      Just (i,[x1,x2,x3,x4]) | i == mkCId "ConsAttribute" -> fg x1 : fgs x2
 
 
       _ -> error ("no ListAttribute " ++ show t)
@@ -200,9 +208,10 @@ instance Gf GListResource where
   gf (GListResource [x1]) = mkApp (mkCId "BaseResource") [gf x1]
   gf (GListResource (x:xs)) = mkApp (mkCId "ConsResource") [gf x, gf (GListResource xs)]
   fg t =
-    case unApp t of
-      Just (i,[x1]) | i == mkCId "BaseResource" -> GListResource [fg x1]
-      Just (i,[x1,x2,x3]) | i == mkCId "ConsResource" -> let GListResource xs = fg x3 in GListResource (fg x1:fg x2:xs)
+    GListResource (fgs t) where
+     fgs t = case unApp t of
+      Just (i,[x1]) | i == mkCId "BaseResource" -> [fg x1]
+      Just (i,[x1,x2,x3]) | i == mkCId "ConsResource" -> fg x1 : fgs x2
 
 
       _ -> error ("no ListResource " ++ show t)
@@ -280,5 +289,29 @@ instance Gf GValue where
 
 
       _ -> error ("no Value " ++ show t)
+
+instance Show GDataType
+
+instance Gf GDataType where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GInheritance
+
+instance Gf GInheritance where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GProperty
+
+instance Gf GProperty where
+  gf _ = undefined
+  fg _ = undefined
+
+
 
 

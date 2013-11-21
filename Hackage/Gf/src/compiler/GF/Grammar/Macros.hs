@@ -21,13 +21,14 @@ module GF.Grammar.Macros where
 import GF.Data.Operations
 import GF.Data.Str
 import GF.Infra.Ident
-import GF.Infra.Modules
 import GF.Grammar.Grammar
 import GF.Grammar.Values
 import GF.Grammar.Predef
 import GF.Grammar.Printer
 
-import Control.Monad (liftM, liftM2)
+import Control.Monad.Identity(Identity(..))
+import qualified Data.Traversable as T(mapM)
+import Control.Monad (liftM, liftM2, liftM3)
 import Data.Char (isDigit)
 import Data.List (sortBy,nub)
 import Text.PrettyPrint
@@ -41,8 +42,8 @@ typeForm t =
     App c a ->
       let (_,  cat, args) = typeForm c
       in ([],cat,args ++ [a])
-    Q  m c -> ([],(m,c),[])
-    QC m c -> ([],(m,c),[])
+    Q  c -> ([],c,[])
+    QC c -> ([],c,[])
     Sort c -> ([],(identW, c),[])
     _      -> error (render (text "no normal form of type" <+> ppTerm Unqualified 0 t))
 
@@ -61,16 +62,15 @@ valCat typ =
 valType :: Type -> Type
 valType typ =
   let (_,cat,xx) = typeForm typ --- not optimal to do in this way
-  in mkApp (uncurry Q cat) xx
+  in mkApp (Q cat) xx
 
 valTypeCnc :: Type -> Type
 valTypeCnc typ = snd (typeFormCnc typ)
 
 typeSkeleton :: Type -> ([(Int,Cat)],Cat)
 typeSkeleton typ =
-  let (cont,cat,_) = typeForm typ
-      args = map (\(b,x,t) -> typeSkeleton t) cont
-  in ([(length c, v) | (c,v) <- args], cat)
+  let (ctxt,cat,_) = typeForm typ
+  in ([(length c, v) | (b,x,t) <- ctxt, let (c,v) = typeSkeleton t], cat)
 
 catSkeleton :: Type -> ([Cat],Cat)
 catSkeleton typ =
@@ -93,12 +93,12 @@ isHigherOrderType t = errVal True $ do  -- pessimistic choice
   co <- contextOfType t
   return $ not $ null [x | (_,x,Prod _ _ _ _) <- co]
 
-contextOfType :: Type -> Err Context
+contextOfType :: Monad m => Type -> m Context
 contextOfType typ = case typ of
   Prod b x a t -> liftM ((b,x,a):) $ contextOfType t
   _            -> return [] 
 
-termForm :: Term -> Err ([(BindType,Ident)], Term, [Term])
+termForm :: Monad m => Term -> m ([(BindType,Ident)], Term, [Term])
 termForm t = case t of
    Abs b x t  ->
      do (x', fun, args) <- termForm t
@@ -166,6 +166,12 @@ unzipR r = (ls, map snd ts) where (ls,ts) = unzip r
 mkAssign :: [(Label,Term)] -> [Assign]
 mkAssign lts = [assign l t | (l,t) <- lts]
 
+projectRec :: Label -> [Assign] -> Term
+projectRec l rs =
+  case lookup l rs of
+    Just (_,t) -> t
+    Nothing    -> error (render (text "no value for label" <+> ppLabel l))
+
 zipAssign :: [Label] -> [Term] -> [Assign]
 zipAssign ls ts = [assign l t | (l,t) <- zip ls ts]
 
@@ -199,7 +205,7 @@ typeTok   = Sort cTok
 typeStrs  = Sort cStrs
 
 typeString, typeFloat, typeInt :: Term
-typeInts :: Integer -> Term
+typeInts :: Int -> Term
 typePBool :: Term
 typeError :: Term
 
@@ -210,17 +216,17 @@ typeInts i = App (cnPredef cInts) (EInt i)
 typePBool = cnPredef cPBool
 typeError = cnPredef cErrorType
 
-isTypeInts :: Term -> Maybe Integer
+isTypeInts :: Term -> Maybe Int
 isTypeInts (App c (EInt i)) | c == cnPredef cInts = Just i
 isTypeInts _                                      = Nothing
 
 isPredefConstant :: Term -> Bool
 isPredefConstant t = case t of
-  Q mod _ | mod == cPredef || mod == cPredefAbs -> True
-  _                                             -> False
+  Q (mod,_) | mod == cPredef || mod == cPredefAbs -> True
+  _                                               -> False
 
 cnPredef :: Ident -> Term
-cnPredef f = Q cPredef f
+cnPredef f = Q (cPredef,f)
 
 mkSelects :: Term -> [Term] -> Term
 mkSelects t tt = foldl S t tt
@@ -261,8 +267,8 @@ plusRecType t1 t2 = case (t1, t2) of
   (RecType r1, RecType r2) -> case
     filter (`elem` (map fst r1)) (map fst r2) of
       [] -> return (RecType (r1 ++ r2))
-      ls -> Bad $ render (text "clashing labels" <+> hsep (map ppLabel ls))
-  _ -> Bad $ render (text "cannot add record types" <+> ppTerm Unqualified 0 t1 <+> text "and" <+> ppTerm Unqualified 0 t2) 
+      ls -> fail $ render (text "clashing labels" <+> hsep (map ppLabel ls))
+  _ -> fail $ render (text "cannot add record types" <+> ppTerm Unqualified 0 t1 <+> text "and" <+> ppTerm Unqualified 0 t2) 
 
 plusRecord :: Term -> Term -> Err Term
 plusRecord t1 t2 =
@@ -271,7 +277,7 @@ plusRecord t1 t2 =
                               (l,v) <- r1, not (elem l (map fst r2)) ] ++ r2))
    (_,    FV rs) -> mapM (plusRecord t1) rs >>= return . FV
    (FV rs,_    ) -> mapM (`plusRecord` t2) rs >>= return . FV
-   _ -> Bad $ render (text "cannot add records" <+> ppTerm Unqualified 0 t1 <+> text "and" <+> ppTerm Unqualified 0 t2)
+   _ -> fail $ render (text "cannot add records" <+> ppTerm Unqualified 0 t1 <+> text "and" <+> ppTerm Unqualified 0 t2)
 
 -- | default linearization type
 defLinType :: Type
@@ -299,7 +305,7 @@ freshAsTerm s = Vr (varX (readIntArg s))
 string2term :: String -> Term
 string2term = K
 
-int2term :: Integer -> Term
+int2term :: Int -> Term
 int2term = EInt
 
 float2term :: Double -> Term
@@ -333,12 +339,12 @@ term2patt trm = case termForm trm of
   Ok ([], Con c, aa) -> do
     aa' <- mapM term2patt aa
     return (PC c aa')
-  Ok ([], QC p c, aa) -> do
+  Ok ([], QC  c, aa) -> do
     aa' <- mapM term2patt aa
-    return (PP p c aa')
+    return (PP c aa')
 
-  Ok ([], Q p c, []) -> do
-    return (PM p c)
+  Ok ([], Q c, []) -> do
+    return (PM c)
 
   Ok ([], R r, []) -> do
     let (ll,aa) = unzipR r
@@ -381,10 +387,10 @@ patt2term pt = case pt of
   PV x      -> Vr x
   PW        -> Vr identW             --- not parsable, should not occur
   PMacro c  -> Cn c
-  PM p c    -> Q p c
+  PM c      -> Q c
 
   PC c pp   -> mkApp (Con c) (map patt2term pp)
-  PP p c pp -> mkApp (QC p c) (map patt2term pp)
+  PP c pp   -> mkApp (QC  c) (map patt2term pp)
 
   PR r      -> R [assign l (patt2term p) | (l,p) <- r] 
   PT _ p    -> patt2term p
@@ -403,8 +409,8 @@ patt2term pt = case pt of
 
 redirectTerm :: Ident -> Term -> Term
 redirectTerm n t = case t of
-  QC _ f -> QC n f
-  Q _ f  -> Q  n f
+  QC (_,f) -> QC (n,f)
+  Q  (_,f) -> Q  (n,f)
   _ -> composSafeOp (redirectTerm n) t
 
 -- | to gather ultimate cases in a table; preserves pattern list
@@ -426,7 +432,7 @@ strsFromTerm t = case t of
     s' <- strsFromTerm s
     t' <- strsFromTerm t
     return [glueStr x y | x <- s', y <- t']
-  Alts (d,vs) -> do
+  Alts d vs -> do
     d0 <- strsFromTerm d
     v0 <- mapM (strsFromTerm . fst) vs
     c0 <- mapM (strsFromTerm . snd) vs
@@ -438,7 +444,7 @@ strsFromTerm t = case t of
            ]
   FV ts -> mapM strsFromTerm ts >>= return . concat
   Strs ts -> mapM strsFromTerm ts >>= return . concat  
-  _ -> Bad (render (text "cannot get Str from term" <+> ppTerm Unqualified 0 t))
+  _ -> fail (render (text "cannot get Str from term" <+> ppTerm Unqualified 0 t))
 
 -- | to print an Str-denoting term as a string; if the term is of wrong type, the error msg
 stringFromTerm :: Term -> String
@@ -447,95 +453,53 @@ stringFromTerm = err id (ifNull "" (sstr . head)) . strsFromTerm
 
 -- | to define compositional term functions
 composSafeOp :: (Term -> Term) -> Term -> Term
-composSafeOp op trm = case composOp (mkMonadic op) trm of
-  Ok t -> t
-  _ -> error "the operation is safe isn't it ?"
- where
- mkMonadic f = return . f
+composSafeOp op = runIdentity . composOp (return . op)
 
 -- | to define compositional term functions
 composOp :: Monad m => (Term -> m Term) -> Term -> m Term
 composOp co trm = 
  case trm of
-   App c a -> 
-     do c' <- co c
-        a' <- co a
-        return (App c' a')
-   Abs b x t ->
-     do t' <- co t
-        return (Abs b x t')
-   Prod b x a t -> 
-     do a' <- co a
-        t' <- co t
-        return (Prod b x a' t')
-   S c a -> 
-     do c' <- co c
-        a' <- co a
-        return (S c' a')
-   Table a c -> 
-     do a' <- co a
-        c' <- co c
-        return (Table a' c')
-   R r -> 
-     do r' <- mapAssignM co r
-        return (R r')
-   RecType r -> 
-     do r' <- mapPairListM (co . snd) r
-        return (RecType r')
-   P t i ->
-     do t' <- co t
-        return (P t' i)
-   ExtR a c -> 
-     do a' <- co a
-        c' <- co c
-        return (ExtR a' c')
-
-   T i cc -> 
-     do cc' <- mapPairListM (co . snd) cc
-        i'  <- changeTableType co i
-        return (T i' cc')
-
-   V ty vs ->
-     do ty' <- co ty
-        vs' <- mapM co vs
-        return (V ty' vs')
-
-   Let (x,(mt,a)) b -> 
-     do a'  <- co a
-        mt' <- case mt of
-                 Just t -> co t >>= (return . Just) 
-                 _ -> return mt
-        b'  <- co b
-        return (Let (x,(mt',a')) b')
-
-   C s1 s2 -> 
-     do v1 <- co s1 
-        v2 <- co s2
-        return (C v1 v2)
-   Glue s1 s2 -> 
-     do v1 <- co s1
-        v2 <- co s2
-        return (Glue v1 v2)
-   Alts (t,aa) ->
-     do t' <- co t
-        aa' <- mapM (pairM co) aa
-        return (Alts (t',aa'))
-   FV ts -> mapM co ts >>= return . FV
-   Strs tt -> mapM co tt >>= return . Strs
-
-   EPattType ty -> 
-     do ty' <- co ty
-        return (EPattType ty')
-
-   ELincat c ty -> 
-     do ty' <- co ty
-        return (ELincat c ty')
-
-   ELin c ty -> 
-     do ty' <- co ty
-        return (ELin c ty')
-
+   App c a          -> liftM2 App (co c) (co a)
+   Abs b x t        -> liftM (Abs b x) (co t)
+   Prod b x a t     -> liftM2 (Prod b x) (co a) (co t)
+   S c a            -> liftM2 S (co c) (co a)
+   Table a c        -> liftM2 Table (co a) (co c)
+   R r              -> liftM R (mapAssignM co r)
+   RecType r        -> liftM RecType (mapPairsM co r)
+   P t i            -> liftM2 P (co t) (return i)
+   ExtR a c         -> liftM2 ExtR (co a) (co c)
+   T i cc           -> liftM2 (flip T) (mapPairsM co cc) (changeTableType co i)
+   V ty vs          -> liftM2 V (co ty) (mapM co vs)
+   Let (x,(mt,a)) b -> liftM3 let' (co a) (T.mapM co mt) (co b)
+     where let' a' mt' b' = Let (x,(mt',a')) b'
+   C s1 s2          -> liftM2 C (co s1) (co s2)
+   Glue s1 s2       -> liftM2 Glue (co s1) (co s2)
+   Alts t aa        -> liftM2 Alts (co t) (mapM (pairM co) aa)
+   FV ts            -> liftM FV (mapM co ts)
+   Strs tt          -> liftM Strs (mapM co tt)
+   EPattType ty     -> liftM EPattType (co ty)
+   ELincat c ty     -> liftM (ELincat c) (co ty)
+   ELin c ty        -> liftM (ELin c) (co ty)
+   ImplArg t        -> liftM ImplArg (co t)
    _ -> return trm -- covers K, Vr, Cn, Sort, EPatt
+
+composSafePattOp op = runIdentity . composPattOp (return . op)
+
+composPattOp :: Monad m => (Patt -> m Patt) -> Patt -> m Patt
+composPattOp op patt =
+  case patt of
+    PC c ps         -> liftM  (PC c) (mapM op ps)
+    PP qc ps        -> liftM  (PP qc) (mapM op ps)
+    PR as           -> liftM  PR (mapPairsM op as)
+    PT ty p         -> liftM  (PT ty) (op p)
+    PAs x p         -> liftM  (PAs x) (op p)
+    PImplArg p      -> liftM  PImplArg (op p)
+    PNeg p          -> liftM  PNeg (op p)
+    PAlt p1 p2      -> liftM2 PAlt (op p1) (op p2)
+    PSeq p1 p2      -> liftM2 PSeq (op p1) (op p2)
+    PMSeq (_,p1) (_,p2) -> liftM2 PSeq (op p1) (op p2) -- information loss
+    PRep p          -> liftM  PRep (op p)
+    _               -> return patt -- covers cases without subpatterns
 
 getTableType :: TInfo -> Err Type
 getTableType i = case i of
@@ -567,17 +531,33 @@ collectOp co trm = case trm of
   Let (x,(mt,a)) b -> maybe [] co mt ++ co a ++ co b
   C s1 s2      -> co s1 ++ co s2 
   Glue s1 s2   -> co s1 ++ co s2 
-  Alts (t,aa)  -> let (x,y) = unzip aa in co t ++ concatMap co (x ++ y)
+  Alts t aa    -> let (x,y) = unzip aa in co t ++ concatMap co (x ++ y)
   FV ts        -> concatMap co ts
   Strs tt      -> concatMap co tt
   _            -> [] -- covers K, Vr, Cn, Sort
+
+collectPattOp :: (Patt -> [a]) -> Patt -> [a]
+collectPattOp op patt =
+  case patt of
+    PC c ps         -> concatMap op ps
+    PP qc ps        -> concatMap op ps
+    PR as           -> concatMap (op.snd) as
+    PT ty p         -> op p
+    PAs x p         -> op p
+    PImplArg p      -> op p
+    PNeg p          -> op p
+    PAlt p1 p2      -> op p1++op p2
+    PSeq p1 p2      -> op p1++op p2
+    PMSeq (_,p1) (_,p2) -> op p1++op p2
+    PRep p          -> op p
+    _               -> []     -- covers cases without subpatterns
 
 -- | to find the word items in a term
 wordsInTerm :: Term -> [String]
 wordsInTerm trm = filter (not . null) $ case trm of
    K s     -> [s]
    S c _   -> wo c
-   Alts (t,aa) -> wo t ++ concatMap (wo . fst) aa
+   Alts t aa -> wo t ++ concatMap (wo . fst) aa
    _       -> collectOp wo trm
  where wo = wordsInTerm
 
@@ -604,24 +584,46 @@ allDependencies ism b =
   [(f, nub (concatMap opty (pts i))) | (f,i) <- tree2list b]
   where
     opersIn t = case t of
-      Q n c | ism n -> [c]
-      QC n c | ism n -> [c]
+      Q  (n,c) | ism n -> [c]
+      QC (n,c) | ism n -> [c]
       _ -> collectOp opersIn t
     opty (Just (L _ ty)) = opersIn ty
     opty _ = []
     pts i = case i of
       ResOper pty pt -> [pty,pt]
-      ResParam (Just ps) _ -> [Just (L loc t) | L loc (_,cont) <- ps, (_,_,t) <- cont]
-      CncCat pty _ _ -> [pty]
-      CncFun _   pt _ -> [pt]  ---- (Maybe (Ident,(Context,Type))
-      AbsFun pty _ ptr -> [pty] --- ptr is def, which can be mutual
+      ResOverload _ tyts -> concat [[Just ty, Just tr] | (ty,tr) <- tyts]
+      ResParam (Just (L loc ps)) _ -> [Just (L loc t) | (_,cont) <- ps, (_,_,t) <- cont]
+      CncCat pty _ _ _ -> [pty]
+      CncFun _   pt _ _ -> [pt]  ---- (Maybe (Ident,(Context,Type))
+      AbsFun pty _ ptr _ -> [pty] --- ptr is def, which can be mutual
       AbsCat (Just (L loc co)) -> [Just (L loc ty) | (_,_,ty) <- co]
       _              -> []
 
 topoSortJments :: SourceModule -> Err [(Ident,Info)]
 topoSortJments (m,mi) = do
   is <- either
-          return 
+          return
           (\cyc -> Bad (render (text "circular definitions:" <+> fsep (map ppIdent (head cyc)))))
           (topoTest (allDependencies (==m) (jments mi)))
   return (reverse [(i,info) | i <- is, Ok info <- [lookupTree showIdent i (jments mi)]])
+
+topoSortJments2 :: SourceModule -> Err [[(Ident,Info)]]
+topoSortJments2 (m,mi) = do
+  iss <- either
+           return
+           (\cyc -> fail (render (text "circular definitions:"
+                                  <+> fsep (map ppIdent (head cyc)))))
+           (topoTest2 (allDependencies (==m) (jments mi)))
+  return
+    [[(i,info) | i<-is,Ok info<-[lookupTree showIdent i (jments mi)]] | is<-iss]
+{-
+-- | Smart constructor for PSeq
+pSeq p1 p2 =
+  case (p1,p2) of
+    (PString s1,PString s2) -> PString (s1++s2)
+    (PSeq p11 (PString s1),PString s2) -> PSeq p11 (PString (s1++s2))
+    (PString s1,PSeq (PString s2) p22) -> PSeq (PString (s1++s2)) p22
+    (PSeq p11 (PString s1),PSeq (PString s2) p22) ->
+        PSeq p11 (PSeq (PString (s1++s2)) p22)
+    _ -> PSeq p1 p2
+-}

@@ -19,7 +19,6 @@ module GF.Compile.Refresh (refreshTerm, refreshTermN,
 import GF.Data.Operations
 import GF.Grammar.Grammar
 import GF.Infra.Ident
-import GF.Infra.Modules
 import GF.Grammar.Macros
 import Control.Monad
 
@@ -60,6 +59,8 @@ refresh e = case e of
   
   T i cc -> liftM2 T (refreshTInfo i) (mapM refreshCase cc)
 
+  App f a -> liftM2 App (inBlockSTM (refresh f)) (refresh a)
+
   _ -> composOp refresh e
 
 refreshCase :: (Patt,Term) -> STM IdState (Patt,Term)
@@ -68,7 +69,7 @@ refreshCase (p,t) = liftM2 (,) (refreshPatt p) (refresh t)
 refreshPatt p = case p of
   PV x    -> liftM PV     (refVar x)
   PC c ps -> liftM (PC c) (mapM refreshPatt ps)
-  PP q c ps -> liftM (PP q c) (mapM refreshPatt ps)
+  PP c ps -> liftM (PP c) (mapM refreshPatt ps)
   PR r    -> liftM PR     (mapPairsM refreshPatt r)
   PT t p' -> liftM2 PT    (refresh t) (refreshPatt p')
 
@@ -105,15 +106,15 @@ refreshEquation pst = err Bad (return . fst) (appSTM (refr pst) initIdState) whe
 
 -- for concrete and resource in grammar, before optimizing
 
-refreshGrammar :: SourceGrammar -> Err SourceGrammar
-refreshGrammar = liftM (MGrammar . snd) . foldM refreshModule (0,[]) . modules
+--refreshGrammar :: SourceGrammar -> Err SourceGrammar
+--refreshGrammar = liftM (mGrammar . snd) . foldM refreshModule (0,[]) . modules
 
-refreshModule :: (Int,[SourceModule]) -> SourceModule -> Err (Int,[SourceModule])
-refreshModule (k,ms) mi@(i,mo)
+refreshModule :: (Int,SourceGrammar) -> SourceModule -> Err (Int,[SourceModule])
+refreshModule (k,sgr) mi@(i,mo)
   | isModCnc mo || isModRes mo = do
       (k',js') <- foldM refreshRes (k,[]) $ tree2list $ jments mo
-      return (k', (i, replaceJudgements mo (buildTree js')) : ms)
-  | otherwise = return (k, mi:ms)
+      return (k', (i,mo{jments=buildTree js'}) : modules sgr)
+  | otherwise = return (k, mi:modules sgr)
  where
   refreshRes (k,cs) ci@(c,info) = case info of
     ResOper ptyp (Just (L loc trm)) -> do   ---- refresh ptyp
@@ -123,11 +124,22 @@ refreshModule (k,ms) mi@(i,mo)
       (k',tyts') <- liftM (\ (t,(_,i)) -> (i,t)) $ 
                     appSTM (mapPairsM (\(L loc t) -> liftM (L loc) (refresh t)) tyts) (initIdStateN k)
       return $ (k', (c, ResOverload os tyts'):cs)
-    CncCat mt (Just (L loc trm)) pn -> do   ---- refresh mt, pn
+    CncCat mt (Just (L loc trm)) mn mpmcfg-> do   ---- refresh mt, pn
       (k',trm') <- refreshTermKN k trm
-      return $ (k', (c, CncCat mt (Just (L loc trm')) pn):cs)
-    CncFun mt (Just (L loc trm)) pn -> do   ---- refresh pn
+      return $ (k', (c, CncCat mt (Just (L loc trm')) mn mpmcfg):cs)
+    CncFun mt (Just (L loc trm)) mn mpmcfg -> do   ---- refresh pn
       (k',trm') <- refreshTermKN k trm
-      return $ (k', (c, CncFun mt (Just (L loc trm')) pn):cs)
+      return $ (k', (c, CncFun mt (Just (L loc trm')) mn mpmcfg):cs)
     _ -> return (k, ci:cs)
+
+
+-- running monad and returning to initial state
+
+inBlockSTM :: STM s a -> STM s a
+inBlockSTM mo = do
+  s <- readSTM
+  v <- mo
+  writeSTM s
+  return v
+
 

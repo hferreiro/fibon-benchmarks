@@ -1,11 +1,14 @@
+{-# LANGUAGE CPP #-}
 module GF.Infra.Option
     (
      -- * Option types
      Options, 
      Flags(..), 
-     Mode(..), Phase(..), Verbosity(..), OutputFormat(..), 
+     Mode(..), Phase(..), Verbosity(..), 
+     OutputFormat(..), 
      SISRFormat(..), Optimization(..), CFGTransform(..), HaskellOption(..),
-     Dump(..), Printer(..), Recomp(..),
+     Dump(..), Pass(..), Recomp(..),
+     outputFormatsExpl, 
      -- * Option parsing 
      parseOptions, parseModuleOptions, fixRelativeLibPaths,
      -- * Option pretty-printing
@@ -17,7 +20,7 @@ module GF.Infra.Option
      helpMessage,
      -- * Checking specific options
      flag, cfgTransform, haskellOption, readOutputFormat,
-     isLexicalCat, renameEncoding,
+     isLexicalCat, isLiteralCat, renameEncoding,
      -- * Setting specific options
      setOptimization, setCFGTransform,
      -- * Convenience methods for checking options    
@@ -28,7 +31,9 @@ import Control.Monad
 import Data.Char (toLower, isDigit)
 import Data.List
 import Data.Maybe
+import GF.Infra.Ident
 import GF.Infra.GetOpt
+import GF.Grammar.Predef
 --import System.Console.GetOpt
 import System.FilePath
 import System.IO
@@ -37,13 +42,13 @@ import GF.Data.ErrM
 
 import Data.Set (Set)
 import qualified Data.Set as Set
-
+import qualified Data.ByteString.Char8 as BS
 
 
 
 usageHeader :: String
 usageHeader = unlines 
- ["Usage: gfc [OPTIONS] [FILE [...]]",
+ ["Usage: gf [OPTIONS] [FILE [...]]",
   "",
   "How each FILE is handled depends on the file name suffix:",
   "",
@@ -70,6 +75,7 @@ errors = fail . unlines
 -- Types
 
 data Mode = ModeVersion | ModeHelp | ModeInteractive | ModeRun | ModeCompiler
+          | ModeServer {-port::-}Int
   deriving (Show,Eq,Ord)
 
 data Verbosity = Quiet | Normal | Verbose | Debug
@@ -80,10 +86,11 @@ data Phase = Preproc | Convert | Compile | Link
 
 data OutputFormat = FmtPGFPretty
                   | FmtJavaScript 
+                  | FmtPython 
                   | FmtHaskell 
                   | FmtProlog
-                  | FmtProlog_Abs
                   | FmtLambdaProlog
+                  | FmtByteCode
                   | FmtBNF
                   | FmtEBNF
                   | FmtRegular
@@ -125,11 +132,8 @@ data HaskellOption = HaskellNoPrefix | HaskellGADT | HaskellLexical
 data Warning = WarnMissingLincat
   deriving (Show,Eq,Ord)
 
-data Dump = DumpSource | DumpRebuild | DumpExtend | DumpRename | DumpTypeCheck | DumpRefresh | DumpOptimize | DumpCanon
-  deriving (Show,Eq,Ord)
-
--- | Pretty-printing options
-data Printer = PrinterStrip -- ^ Remove name qualifiers.
+newtype Dump = Dump Pass deriving (Show,Eq,Ord)
+data Pass = Source | Rebuild | Extend | Rename | TypeCheck | Refresh | Optimize | Canon
   deriving (Show,Eq,Ord)
 
 data Recomp = AlwaysRecomp | RecompIfNewer | NeverRecomp
@@ -139,28 +143,26 @@ data Flags = Flags {
       optMode            :: Mode,
       optStopAfterPhase  :: Phase,
       optVerbosity       :: Verbosity,
-      optProf            :: Bool,
       optShowCPUTime     :: Bool,
-      optEmitGFO         :: Bool,
       optOutputFormats   :: [OutputFormat],
       optSISR            :: Maybe SISRFormat,
       optHaskellOptions  :: Set HaskellOption,
       optLexicalCats     :: Set String,
+      optLiteralCats     :: Set Ident,
       optGFODir          :: Maybe FilePath,
-      optOutputFile      :: Maybe FilePath,
       optOutputDir       :: Maybe FilePath,
       optGFLibPath       :: Maybe FilePath,
+      optDocumentRoot    :: Maybe FilePath, -- For --server mode
       optRecomp          :: Recomp,
-      optPrinter         :: [Printer],
-      optProb            :: Bool,
+      optProbsFile       :: Maybe FilePath,
       optRetainResource  :: Bool,
       optName            :: Maybe String,
-      optAbsName         :: Maybe String,
-      optCncName         :: Maybe String,
-      optResName         :: Maybe String,
       optPreprocessors   :: [String],
       optEncoding        :: String,
+      optPMCFG           :: Bool,
       optOptimizations   :: Set Optimization,
+      optOptimizePGF     :: Bool,
+      optMkIndexPGF      :: Bool,
       optCFGTransforms   :: Set CFGTransform,
       optLibraryPath     :: [FilePath],
       optStartCat        :: Maybe String,
@@ -168,7 +170,10 @@ data Flags = Flags {
       optLexer           :: Maybe String,
       optUnlexer         :: Maybe String,
       optWarnings        :: [Warning],
-      optDump            :: [Dump]
+      optDump            :: [Dump],
+      optTagsOnly        :: Bool,
+      optBeamSize        :: Maybe Double,
+      optNewComp         :: Bool
     }
   deriving (Show)
 
@@ -212,6 +217,7 @@ optionsPGF :: Options -> [(String,String)]
 optionsPGF opts = 
          maybe [] (\x -> [("language",x)]) (flag optSpeechLanguage opts)
       ++ maybe [] (\x -> [("startcat",x)]) (flag optStartCat opts)
+      ++ maybe [] (\x -> [("beam_size",show x)]) (flag optBeamSize opts)
 
 -- Option manipulation
 
@@ -237,29 +243,27 @@ defaultFlags = Flags {
       optMode            = ModeInteractive,
       optStopAfterPhase  = Compile,
       optVerbosity       = Normal,
-      optProf            = False,
       optShowCPUTime     = False,
-      optEmitGFO         = True,
       optOutputFormats   = [],
       optSISR            = Nothing,
       optHaskellOptions  = Set.empty,
+      optLiteralCats     = Set.fromList [cString,cInt,cFloat,cVar],
       optLexicalCats     = Set.empty,
       optGFODir          = Nothing,
-      optOutputFile      = Nothing,
       optOutputDir       = Nothing,
       optGFLibPath       = Nothing,
+      optDocumentRoot    = Nothing,
       optRecomp          = RecompIfNewer,
-      optPrinter         = [],
-      optProb            = False,
+      optProbsFile       = Nothing,
       optRetainResource  = False,
 
       optName            = Nothing,
-      optAbsName         = Nothing,
-      optCncName         = Nothing,
-      optResName         = Nothing,
       optPreprocessors   = [],
       optEncoding        = "latin1",
+      optPMCFG           = True,
       optOptimizations   = Set.fromList [OptStem,OptCSE,OptExpand,OptParametrize],
+      optOptimizePGF     = False,
+      optMkIndexPGF     = False,
       optCFGTransforms   = Set.fromList [CFGRemoveCycles, CFGBottomUpFilter, 
                                          CFGTopDownFilter, CFGMergeIdentical],
       optLibraryPath     = [],
@@ -268,11 +272,19 @@ defaultFlags = Flags {
       optLexer           = Nothing,
       optUnlexer         = Nothing,
       optWarnings        = [],
-      optDump            = []
+      optDump            = [],
+      optTagsOnly        = False,
+      optBeamSize        = Nothing,
+      optNewComp         =
+#ifdef NEW_COMP
+                           True
+#else
+                           False
+#endif
     }
 
--- Option descriptions
-
+-- | Option descriptions
+{-# NOINLINE optDescr #-}
 optDescr :: [OptDescr (Err Options)]
 optDescr = 
     [
@@ -283,21 +295,23 @@ optDescr =
      Option [] ["batch"] (NoArg (mode ModeCompiler)) "Run in batch compiler mode.",
      Option [] ["interactive"] (NoArg (mode ModeInteractive)) "Run in interactive mode (default).",
      Option [] ["run"] (NoArg (mode ModeRun)) "Run in interactive mode, showing output only (no other messages).",
+     Option [] ["server"] (OptArg modeServer "port") $
+       "Run in HTTP server mode on given port (default "++show defaultPort++").",
+     Option [] ["document-root"] (ReqArg gfDocuRoot "DIR")
+           "Overrides the default document root for --server mode.",
+     Option [] ["tags"] (NoArg (set $ \o -> o{optMode = ModeCompiler, optTagsOnly = True})) "Build TAGS file and exit.",
      Option ['E'] [] (NoArg (phase Preproc)) "Stop after preprocessing (with --preproc).",
      Option ['C'] [] (NoArg (phase Convert)) "Stop after conversion to .gf.",
      Option ['c'] [] (NoArg (phase Compile)) "Stop after compiling to .gfo (default) .",
      Option [] ["make"] (NoArg (liftM2 addOptions (mode ModeCompiler) (phase Link))) "Build .pgf file and other output files and exit.",
-     Option [] ["prof"] (NoArg (prof True)) "Dump profiling information when compiling to PMCFG",
      Option [] ["cpu"] (NoArg (cpu True)) "Show compilation CPU time statistics.",
      Option [] ["no-cpu"] (NoArg (cpu False)) "Don't show compilation CPU time statistics (default).",
-     Option [] ["emit-gfo"] (NoArg (emitGFO True)) "Create .gfo files (default).",
-     Option [] ["no-emit-gfo"] (NoArg (emitGFO False)) "Do not create .gfo files.",
      Option [] ["gfo-dir"] (ReqArg gfoDir "DIR") "Directory to put .gfo files in (default = '.').",
      Option ['f'] ["output-format"] (ReqArg outFmt "FMT") 
         (unlines ["Output format. FMT can be one of:",
-                  "Multiple concrete: pgf (default), gar, js, prolog, ...",
-                  "Single concrete only: cf, bnf, lbnf, gsl, srgs_xml, srgs_abnf, ...",
-                  "Abstract only: haskell, prolog_abs, ..."]),
+                  "Multiple concrete: pgf (default), js, pgf_pretty, prolog, python, ...", -- gar,
+                  "Single concrete only: bnf, ebnf, fa, gsl, jsgf, regexp, slf, srgs_xml, srgs_abnf, vxml, ....", -- cf, lbnf,
+                  "Abstract only: haskell, ..."]), -- prolog_abs,
      Option [] ["sisr"] (ReqArg sisrFmt "FMT") 
         (unlines ["Include SISR tags in generated speech recognition grammars.",
                   "FMT can be one of: old, 1.0"]),
@@ -306,35 +320,24 @@ optDescr =
              ++ concat (intersperse " | " (map fst haskellOptionNames))),
      Option [] ["lexical"] (ReqArg lexicalCat "CAT[,CAT[...]]") 
             "Treat CAT as a lexical category.",
-     Option ['o'] ["output-file"] (ReqArg outFile "FILE") 
-           "Save output in FILE (default is out.X, where X depends on output format.",
+     Option [] ["literal"] (ReqArg literalCat "CAT[,CAT[...]]") 
+            "Treat CAT as a literal category.",
      Option ['D'] ["output-dir"] (ReqArg outDir "DIR") 
            "Save output files (other than .gfo files) in DIR.",
      Option [] ["gf-lib-path"] (ReqArg gfLibPath "DIR") 
-           "Overides the value of GF_LIB_PATH.",
+           "Overrides the value of GF_LIB_PATH.",
      Option [] ["src","force-recomp"] (NoArg (recomp AlwaysRecomp)) 
                  "Always recompile from source.",
      Option [] ["gfo","recomp-if-newer"] (NoArg (recomp RecompIfNewer)) 
                  "(default) Recompile from source if the source is newer than the .gfo file.",
      Option [] ["gfo","no-recomp"] (NoArg (recomp NeverRecomp)) 
                  "Never recompile from source, if there is already .gfo file.",
-     Option [] ["strip"] (NoArg (printer PrinterStrip))
-                 "Remove name qualifiers when pretty-printing.",
      Option [] ["retain"] (NoArg (set $ \o -> o { optRetainResource = True })) "Retain opers.",
-     Option [] ["prob"] (NoArg (prob True)) "Read probabilities from '--# prob' pragmas.",
+     Option [] ["probs"] (ReqArg probsFile "file.probs") "Read probabilities from file.",
      Option ['n'] ["name"] (ReqArg name "NAME") 
            (unlines ["Use NAME as the name of the output. This is used in the output file names, ",
                      "with suffixes depending on the formats, and, when relevant, ",
                      "internally in the output."]),
-     Option [] ["abs"] (ReqArg absName "NAME")
-            ("Use NAME as the name of the abstract syntax module generated from "
-             ++ "a grammar in GF 1 format."),
-     Option [] ["cnc"] (ReqArg cncName "NAME")
-            ("Use NAME as the name of the concrete syntax module generated from "
-             ++ "a grammar in GF 1 format."),
-     Option [] ["res"] (ReqArg resName "NAME")
-            ("Use NAME as the name of the resource module generated from "
-             ++ "a grammar in GF 1 format."),
      Option ['i'] [] (ReqArg addLibDir "DIR") "Add DIR to the library search path.",
      Option [] ["path"] (ReqArg setLibPath "DIR:DIR:...") "Set the library search path.",
      Option [] ["preproc"] (ReqArg preproc "CMD") 
@@ -346,31 +349,44 @@ optDescr =
      Option [] ["language"] (ReqArg language "LANG") "Set the speech language flag to LANG in the generated grammar.",
      Option [] ["lexer"] (ReqArg lexer "LEXER") "Use lexer LEXER.",
      Option [] ["unlexer"] (ReqArg unlexer "UNLEXER") "Use unlexer UNLEXER.",
+     Option [] ["pmcfg"] (NoArg (pmcfg True)) "Generate PMCFG (default).",
+     Option [] ["no-pmcfg"] (NoArg (pmcfg False)) "Don't generate PMCFG (useful for libraries).",
      Option [] ["optimize"] (ReqArg optimize "OPT") 
                 "Select an optimization package. OPT = all | values | parametrize | none",
+     Option [] ["optimize-pgf"] (NoArg (optimize_pgf True))
+                "Enable or disable global grammar optimization. This could significantly reduce the size of the final PGF file",
+     Option [] ["mk-index"] (NoArg (mkIndex True))
+                "Add an index to the pgf file",
      Option [] ["stem"] (onOff (toggleOptimize OptStem) True) "Perform stem-suffix analysis (default on).",
      Option [] ["cse"] (onOff (toggleOptimize OptCSE) True) "Perform common sub-expression elimination (default on).",
      Option [] ["cfg"] (ReqArg cfgTransform "TRANS") "Enable or disable specific CFG transformations. TRANS = merge, no-merge, bottomup, no-bottomup, ...",
-     dumpOption "source" DumpSource,
-     dumpOption "rebuild" DumpRebuild,
-     dumpOption "extend" DumpExtend,
-     dumpOption "rename" DumpRename,
-     dumpOption "tc" DumpTypeCheck,
-     dumpOption "refresh" DumpRefresh,
-     dumpOption "opt" DumpOptimize,
-     dumpOption "canon" DumpCanon
+     Option [] ["beam_size"] (ReqArg readDouble "SIZE") "Set the beam size for statistical parsing",
+     Option [] ["new-comp"] (NoArg (set $ \o -> o{optNewComp = True})) "Use the new experimental compiler.",
+     Option [] ["old-comp"] (NoArg (set $ \o -> o{optNewComp = False})) "Use old trusty compiler.",
+     dumpOption "source" Source,
+     dumpOption "rebuild" Rebuild,
+     dumpOption "extend" Extend,
+     dumpOption "rename" Rename,
+     dumpOption "tc" TypeCheck,
+     dumpOption "refresh" Refresh,
+     dumpOption "opt" Optimize,
+     dumpOption "canon" Canon
 
     ]
  where phase       x = set $ \o -> o { optStopAfterPhase = x }
        mode        x = set $ \o -> o { optMode = x }
+       defaultPort   = 41296
+       modeServer    = maybe (ms defaultPort) readPort
+         where
+           ms = mode . ModeServer
+           readPort p = maybe err ms (readMaybe p)
+                 where err = fail $ "Bad server port: "++p
        verbosity mv  = case mv of
                            Nothing -> set $ \o -> o { optVerbosity = Verbose }
                            Just v  -> case readMaybe v >>= toEnumBounded of
                                         Just i  -> set $ \o -> o { optVerbosity = i }
                                         Nothing -> fail $ "Bad verbosity: " ++ show v
-       prof        x = set $ \o -> o { optProf = x }
        cpu         x = set $ \o -> o { optShowCPUTime = x }
-       emitGFO     x = set $ \o -> o { optEmitGFO = x }
        gfoDir      x = set $ \o -> o { optGFODir = Just x }
        outFmt      x = readOutputFormat x >>= \f ->
                          set $ \o -> o { optOutputFormats = optOutputFormats o ++ [f] }
@@ -382,18 +398,15 @@ optDescr =
                          Just p  -> set $ \o -> o { optHaskellOptions = Set.insert p (optHaskellOptions o) }
                          Nothing -> fail $ "Unknown Haskell option: " ++ x
                                             ++ " Known: " ++ show (map fst haskellOptionNames)
+       literalCat  x = set $ \o -> o { optLiteralCats = foldr Set.insert (optLiteralCats o) ((map (identC . BS.pack) . splitBy (==',')) x) }
        lexicalCat  x = set $ \o -> o { optLexicalCats = foldr Set.insert (optLexicalCats o) (splitBy (==',') x) }
-       outFile     x = set $ \o -> o { optOutputFile = Just x }
        outDir      x = set $ \o -> o { optOutputDir = Just x }
        gfLibPath   x = set $ \o -> o { optGFLibPath = Just x }
+       gfDocuRoot  x = set $ \o -> o { optDocumentRoot = Just x }
        recomp      x = set $ \o -> o { optRecomp = x }
-       printer     x = set $ \o -> o { optPrinter = x : optPrinter o }
-       prob        x = set $ \o -> o { optProb = x }
+       probsFile   x = set $ \o -> o { optProbsFile = Just x }
 
        name        x = set $ \o -> o { optName = Just x }
-       absName     x = set $ \o -> o { optAbsName = Just x }
-       cncName     x = set $ \o -> o { optCncName = Just x }
-       resName     x = set $ \o -> o { optResName = Just x }
        addLibDir   x = set $ \o -> o { optLibraryPath = x:optLibraryPath o }
        setLibPath  x = set $ \o -> o { optLibraryPath = splitInModuleSearchPath x }
        preproc     x = set $ \o -> o { optPreprocessors = optPreprocessors o ++ [x] }
@@ -403,9 +416,14 @@ optDescr =
        lexer       x = set $ \o -> o { optLexer = Just x }
        unlexer     x = set $ \o -> o { optUnlexer = Just x }
 
+       pmcfg       x = set $ \o -> o { optPMCFG = x }
+
        optimize    x = case lookup x optimizationPackages of
                          Just p  -> set $ \o -> o { optOptimizations = p }
                          Nothing -> fail $ "Unknown optimization package: " ++ x
+                         
+       optimize_pgf x = set $ \o -> o { optOptimizePGF = x }
+       mkIndex x = set $ \o -> o { optMkIndexPGF = x }
 
        toggleOptimize x b = set $ setOptimization' x b
 
@@ -417,32 +435,41 @@ optDescr =
                               Nothing -> fail $ "Unknown CFG transformation: " ++ x'
                                                 ++ " Known: " ++ show (map fst cfgTransformNames)
 
-       dumpOption s d = Option [] ["dump-"++s] (NoArg (set $ \o -> o { optDump = d:optDump o})) ("Dump output of the " ++ s ++ " phase.")
+       readDouble x = case reads x of
+                        [(d,"")] -> set $ \o -> o { optBeamSize = Just d }
+                        _        -> fail "A floating point number is expected"
+
+       dumpOption s d = Option [] ["dump-"++s] (NoArg (set $ \o -> o { optDump = Dump d:optDump o})) ("Dump output of the " ++ s ++ " phase.")
 
        set = return . Options
 
 outputFormats :: [(String,OutputFormat)]
-outputFormats = 
-    [("pgf_pretty",   FmtPGFPretty),
-     ("js",           FmtJavaScript),
-     ("haskell",      FmtHaskell),
-     ("prolog",       FmtProlog),
-     ("prolog_abs",   FmtProlog_Abs),
-     ("lambda_prolog",FmtLambdaProlog),
-     ("bnf",          FmtBNF),
-     ("ebnf",         FmtEBNF),
-     ("regular",      FmtRegular),
-     ("nolr",         FmtNoLR),
-     ("srgs_xml",     FmtSRGS_XML),
-     ("srgs_xml_nonrec",     FmtSRGS_XML_NonRec),
-     ("srgs_abnf",    FmtSRGS_ABNF),
-     ("srgs_abnf_nonrec",    FmtSRGS_ABNF_NonRec),
-     ("jsgf",         FmtJSGF),
-     ("gsl",          FmtGSL),
-     ("vxml",         FmtVoiceXML),
-     ("slf",          FmtSLF),
-     ("regexp",       FmtRegExp),
-     ("fa",           FmtFA)]
+outputFormats = map fst outputFormatsExpl
+
+outputFormatsExpl :: [((String,OutputFormat),String)]
+outputFormatsExpl = 
+    [(("pgf_pretty",   FmtPGFPretty),"human-readable pgf"),
+     (("js",           FmtJavaScript),"JavaScript (whole grammar)"),
+     (("python",       FmtPython),"Python (whole grammar)"),
+     (("haskell",      FmtHaskell),"Haskell (abstract syntax)"),
+     (("prolog",       FmtProlog),"Prolog (whole grammar)"),
+     (("lambda_prolog",FmtLambdaProlog),"LambdaProlog (abstract syntax)"),
+     (("lp_byte_code", FmtByteCode),"Bytecode for Teyjus (abstract syntax, experimental)"),
+     (("bnf",          FmtBNF),"BNF (context-free grammar)"),
+     (("ebnf",         FmtEBNF),"Extended BNF"),
+     (("regular",      FmtRegular),"* regular grammar"),
+     (("nolr",         FmtNoLR),"* context-free with no left recursion"),
+     (("srgs_xml",     FmtSRGS_XML),"SRGS speech recognition format in XML"),
+     (("srgs_xml_nonrec",     FmtSRGS_XML_NonRec),"SRGS XML, recursion eliminated"),
+     (("srgs_abnf",    FmtSRGS_ABNF),"SRGS speech recognition format in ABNF"),
+     (("srgs_abnf_nonrec",    FmtSRGS_ABNF_NonRec),"SRGS ABNF, recursion eliminated"),
+     (("jsgf",         FmtJSGF),"JSGF speech recognition format"),
+     (("gsl",          FmtGSL),"Nuance speech recognition format"),
+     (("vxml",         FmtVoiceXML),"Voice XML based on abstract syntax"),
+     (("slf",          FmtSLF),"SLF speech recognition format"),
+     (("regexp",       FmtRegExp),"regular expression"),
+     (("fa",           FmtFA),"finite automaton in graphviz format")
+     ]
 
 instance Show OutputFormat where
     show = lookupShow outputFormats
@@ -529,6 +556,9 @@ cfgTransform opts t = Set.member t (flag optCFGTransforms opts)
 
 haskellOption :: Options -> HaskellOption -> Bool
 haskellOption opts o = Set.member o (flag optHaskellOptions opts)
+
+isLiteralCat :: Options -> Ident -> Bool
+isLiteralCat opts c = Set.member c (flag optLiteralCats opts)
 
 isLexicalCat :: Options -> String -> Bool
 isLexicalCat opts c = Set.member c (flag optLexicalCats opts)

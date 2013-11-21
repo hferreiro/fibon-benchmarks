@@ -2,7 +2,7 @@ module PGF.Binary where
 
 import PGF.CId
 import PGF.Data
-import PGF.Macros
+import PGF.Optimize
 import Data.Binary
 import Data.Binary.Put
 import Data.Binary.Get
@@ -38,12 +38,16 @@ instance Binary CId where
   get    = liftM CId get
 
 instance Binary Abstr where
-  put abs = put (aflags abs, funs abs, cats abs)
+  put abs = put (aflags abs, 
+                 fmap (\(w,x,y,z,_) -> (w,x,y,z)) (funs abs),
+                 fmap (\(x,y,_) -> (x,y)) (cats abs))
   get = do aflags <- get
            funs <- get
            cats <- get
            return (Abstr{ aflags=aflags
-                        , funs=funs, cats=cats
+                        , funs=fmap (\(w,x,y,z) -> (w,x,y,z,0)) funs
+                        , cats=fmap (\(x,y) -> (x,y,0)) cats
+                        , code=BS.empty                        
                         })
   
 instance Binary Concr where
@@ -51,6 +55,7 @@ instance Binary Concr where
                put (printnames cnc)
                putArray2 (sequences cnc)
                putArray (cncfuns cnc)
+               put (lindefs cnc)
                put (productions cnc)
                put (cnccats cnc)
                put (totalCats cnc)
@@ -58,47 +63,22 @@ instance Binary Concr where
            printnames  <- get
            sequences   <- getArray2
            cncfuns     <- getArray
+           lindefs     <- get
            productions <- get
            cnccats     <- get
            totalCats   <- get
            return (Concr{ cflags=cflags, printnames=printnames
-                        , sequences=sequences, cncfuns=cncfuns, productions=productions
+                        , sequences=sequences, cncfuns=cncfuns, lindefs=lindefs
+                        , productions=productions
                         , pproductions = IntMap.empty
                         , lproductions = Map.empty
+                        , lexicon = IntMap.empty
                         , cnccats=cnccats, totalCats=totalCats
                         })
 
 instance Binary Alternative where
   put (Alt v x) = put (v,x)
   get = liftM2 Alt get get
-
-instance Binary Term where
-  put (R  es) = putWord8 0 >> put es
-  put (S  es) = putWord8 1 >> put es
-  put (FV es) = putWord8 2 >> put es
-  put (P e v) = putWord8 3 >> put (e,v)
-  put (W e v) = putWord8 4 >> put (e,v)
-  put (C i  ) = putWord8 5 >> put i
-  put (TM i ) = putWord8 6 >> put i
-  put (F f)   = putWord8 7 >> put f
-  put (V i)   = putWord8 8 >> put i
-  put (K (KS s))    = putWord8 9  >> put s
-  put (K (KP d vs)) = putWord8 10 >> put (d,vs)
-
-  get = do tag <- getWord8
-           case tag of
-             0 -> liftM  R  get
-             1 -> liftM  S  get
-             2 -> liftM  FV get
-             3 -> liftM2 P  get get
-             4 -> liftM2 W  get get
-             5 -> liftM  C  get
-             6 -> liftM  TM get
-             7 -> liftM  F  get
-             8 -> liftM  V  get
-             9  -> liftM  (K . KS) get
-             10 -> liftM2 (\d vs -> K (KP d vs)) get get
-             _  -> decodingError
 
 instance Binary Expr where
   put (EAbs b x exp)  = putWord8 0 >> put (b,x,exp)
@@ -169,15 +149,21 @@ instance Binary CncCat where
 instance Binary Symbol where
   put (SymCat n l)       = putWord8 0 >> put (n,l)
   put (SymLit n l)       = putWord8 1 >> put (n,l)
-  put (SymKS ts)         = putWord8 2 >> put ts
-  put (SymKP d vs)       = putWord8 3 >> put (d,vs)
+  put (SymVar n l)       = putWord8 2 >> put (n,l)
+  put (SymKS ts)         = putWord8 3 >> put ts
+  put (SymKP d vs)       = putWord8 4 >> put (d,vs)
   get = do tag <- getWord8
            case tag of
              0 -> liftM2 SymCat get get
              1 -> liftM2 SymLit get get
-             2 -> liftM  SymKS  get
-             3 -> liftM2 (\d vs -> SymKP d vs) get get
+             2 -> liftM2 SymVar get get
+             3 -> liftM  SymKS  get
+             4 -> liftM2 (\d vs -> SymKP d vs) get get
              _ -> decodingError
+
+instance Binary PArg where
+  put (PArg hypos fid) = put (map snd hypos,fid)
+  get = get >>= \(hypos,fid) -> return (PArg (zip (repeat fidVar) hypos) fid)
 
 instance Binary Production where
   put (PApply ruleid args) = putWord8 0 >> put (ruleid,args)
@@ -195,8 +181,8 @@ instance Binary Literal where
   get = do tag <- getWord8
            case tag of
              0 -> liftM  LStr get
-             1 -> liftM  LFlt get
-             2 -> liftM  LInt get
+             1 -> liftM  LInt get
+             2 -> liftM  LFlt get
              _ -> decodingError
 
 
@@ -218,4 +204,4 @@ getArray2 = do n  <- get                       -- read the length
                xs <- replicateM n getArray     -- now the elems.
                return (listArray (0,n-1) xs)
 
-decodingError = fail "This PGF file was compiled with different version of GF"
+decodingError = fail "This file was compiled with different version of GF"

@@ -1,12 +1,13 @@
-{-# LANGUAGE PatternGuards #-}
+{-# LANGUAGE BangPatterns #-}
 module GF.Compile.GrammarToPGF (mkCanon2pgf) where
 
 import GF.Compile.Export
 import GF.Compile.GeneratePMCFG
+import GF.Compile.GenerateBC
 
 import PGF.CId
-import PGF.Macros(updateProductionIndices)
-import PGF.Check(checkLin)
+import PGF.Data(fidInt,fidFloat,fidString)
+import PGF.Optimize(updateProductionIndices)
 import qualified PGF.Macros as CM
 import qualified PGF.Data as C
 import qualified PGF.Data as D
@@ -16,105 +17,92 @@ import GF.Grammar.Grammar
 import qualified GF.Grammar.Lookup as Look
 import qualified GF.Grammar as A
 import qualified GF.Grammar.Macros as GM
-import qualified GF.Compile.Concrete.Compute as Compute ---- 
-import qualified GF.Infra.Modules as M
 import qualified GF.Infra.Option as O
+import GF.Compile.GeneratePMCFG
 
 import GF.Infra.Ident
 import GF.Infra.Option
+import GF.Infra.UseIO (IOE)
 import GF.Data.Operations
 
 import Data.List
-import Data.Function
 import Data.Char (isDigit,isSpace)
+import qualified Data.Set as Set
 import qualified Data.Map as Map
+import qualified Data.IntMap as IntMap
 import qualified Data.ByteString.Char8 as BS
+import Data.Array.IArray
 import Text.PrettyPrint
-import Debug.Trace ----
-
--- when developing, swap commenting
---traceD s t = trace s t 
-traceD s t = t 
+import Control.Monad.Identity
 
 
--- the main function: generate PGF from GF.
-mkCanon2pgf :: Options -> String -> SourceGrammar -> IO D.PGF
-mkCanon2pgf opts cnc gr = (canon2pgf opts pars . reorder abs . canon2canon opts abs) gr
+mkCanon2pgf :: Options -> SourceGrammar -> Ident -> IOE D.PGF
+mkCanon2pgf opts gr am = do
+  (an,abs) <- mkAbstr am
+  cncs     <- mapM mkConcr (allConcretes gr am)
+  return $ updateProductionIndices (D.PGF Map.empty an abs (Map.fromList cncs))
   where
-    abs = err (const c) id $ M.abstractOfConcrete gr c where c = identC (BS.pack cnc)
-    pars = mkParamLincat gr
+    cenv = resourceValues gr
 
--- Generate PGF from GFCM.
--- this assumes a grammar translated by canon2canon
+    mkAbstr am = return (i2i am, D.Abstr flags funs cats bcode)
+      where
+        aflags = 
+          concatOptions (reverse [mflags mo | (_,mo) <- modules gr, isModAbs mo])
 
-canon2pgf :: Options -> (Ident -> Ident -> C.Term) -> SourceGrammar -> IO D.PGF
-canon2pgf opts pars cgr@(M.MGrammar ((a,abm):cms)) = do
-  if dump opts DumpCanon
-    then putStrLn (render (vcat (map (ppModule Qualified) (M.modules cgr))))
-    else return ()
-  cncs <- sequence [mkConcr lang (i2i lang) mo | (lang,mo) <- cms]
-  return $ updateProductionIndices (D.PGF gflags an abs (Map.fromList cncs))
- where
-  -- abstract
-  an  = (i2i a)
-  abs = D.Abstr aflags funs cats
-  gflags = Map.empty
-  aflags = Map.fromList [(mkCId f,C.LStr x) | (f,x) <- optionsPGF (M.flags abm)]
+        (adefs,bcode) =
+          generateByteCode $
+            [((cPredefAbs,c), AbsCat (Just (L NoLoc []))) | c <- [cFloat,cInt,cString]] ++ 
+            Look.allOrigInfos gr am
 
-  mkDef (Just eqs) = Just [C.Equ ps' (mkExp scope' e) | L _ (ps,e) <- eqs, let (scope',ps') = mapAccumL mkPatt [] ps]
-  mkDef Nothing    = Nothing
+        flags = Map.fromList [(mkCId f,if f == "beam_size" then C.LFlt (read x) else C.LStr x) | (f,x) <- optionsPGF aflags]
 
-  mkArrity (Just a) = a
-  mkArrity Nothing  = 0
+        funs = Map.fromList [(i2i f, (mkType [] ty, mkArrity ma, mkDef pty, 0, addr)) | 
+                                   ((m,f),AbsFun (Just (L _ ty)) ma pty _,addr) <- adefs]
+                                   
+        cats = Map.fromList [(i2i c, (snd (mkContext [] cont),catfuns c, addr)) |
+                                   ((m,c),AbsCat (Just (L _ cont)),addr) <- adefs]
 
-  -- concretes
-  lfuns = [(f', (mkType [] ty, mkArrity ma, mkDef pty)) | 
-             (f,AbsFun (Just (L _ ty)) ma pty) <- tree2list (M.jments abm), let f' = i2i f]
-  funs = Map.fromAscList lfuns
-  lcats = [(i2i c, (snd (mkContext [] cont),catfuns c)) |
-                (c,AbsCat (Just (L _ cont))) <- tree2list (M.jments abm)]
-  cats = Map.fromAscList lcats
-  catfuns cat =
-    (map snd . sortBy (compare `on` fst))
-        [(loc,i2i f) | (f,AbsFun (Just (L loc ty)) _ _) <- tree2list (M.jments abm), snd (GM.valCat ty) == cat]
+        catfuns cat =
+              [(0,i2i f) | ((m,f),AbsFun (Just (L _ ty)) _ _ (Just True),_) <- adefs, snd (GM.valCat ty) == cat]
 
-  mkConcr lang0 lang mo = do
-    lins' <- case mapM (checkLin (funs,lins,lincats) lang) (Map.toList lins) of
-               Ok x    -> return x
-               Bad msg -> fail msg
-    cnc <- convertConcrete opts lang flags printnames funs (Map.fromList (map fst lins')) lincats params lindefs
-    return (lang, cnc)
-    where
-      js = tree2list (M.jments mo)
-      flags   = Map.fromList [(mkCId f,C.LStr x) | (f,x) <- optionsPGF (M.flags mo)]
-      utf     = id -- trace (show lang0 +++ show flags) $ 
-                -- if moduleFlag optEncoding (moduleOptions (M.flags mo)) == UTF_8
-                --  then id else id 
-                ---- then (trace "decode" D.convertStringsInTerm decodeUTF8) else id
-      umkTerm = utf . mkTerm
-      lins    = Map.fromAscList 
-        [(f', umkTerm tr)  | (f,CncFun _ (Just (L _ tr)) _) <- js, 
-            let f' = i2i f, exists f'] -- eliminating lins without fun 
-            -- needed even here because of restricted inheritance
-      lincats = Map.fromAscList 
-        [(i2i c, mkCType ty) | (c,CncCat (Just (L _ ty)) _ _) <- js]
-      lindefs = Map.fromAscList 
-        [(i2i c, umkTerm tr)  | (c,CncCat _ (Just (L _ tr)) _) <- js]
-      printnames = Map.union 
-        (Map.fromAscList [(i2i f, realize (umkTerm tr)) | (f,CncFun _ _ (Just (L _ tr))) <- js])
-        (Map.fromAscList [(i2i f, realize (umkTerm tr)) | (f,CncCat _ _ (Just (L _ tr))) <- js])
-      params = Map.fromAscList 
-        [(i2i c, pars lang0 c) | (c,CncCat (Just ty) _ _) <- js]
-      fcfg = Nothing
+    mkConcr cm = do
+      let cflags  = concatOptions [mflags mo | (i,mo) <- modules gr, isModCnc mo, 
+                                                  Just r <- [lookup i (allExtendSpecs gr cm)]]
 
-      exists f = Map.member f funs
+      (seqs,cdefs) <- addMissingPMCFGs
+                           Map.empty 
+                           ([((cPredefAbs,c), CncCat (Just (L NoLoc GM.defLinType)) Nothing Nothing Nothing) | c <- [cInt,cFloat,cString]] ++
+                            Look.allOrigInfos gr cm)
+
+      let flags = Map.fromList [(mkCId f,if f == "beam_size" then C.LFlt (read x) else C.LStr x) | (f,x) <- optionsPGF cflags]
+
+          !(!fid_cnt1,!cnccats) = genCncCats gr am cm cdefs
+          !(!fid_cnt2,!productions,!lindefs,!sequences,!cncfuns)
+                                = genCncFuns gr am cm seqs cdefs fid_cnt1 cnccats
+        
+          printnames = genPrintNames cdefs
+      return (i2i cm, D.Concr flags 
+                              printnames
+                              cncfuns
+                              lindefs
+                              sequences
+                              productions
+                              IntMap.empty
+                              Map.empty
+                              cnccats
+                              IntMap.empty
+                              fid_cnt2)
+      where
+        -- if some module was compiled with -no-pmcfg, then
+        -- we have to create the PMCFG code just before linking
+        addMissingPMCFGs seqs []                  = return (seqs,[])
+        addMissingPMCFGs seqs (((m,id), info):is) = do
+          (seqs,info) <- addPMCFG opts gr cenv Nothing am cm seqs id info
+          (seqs,is  ) <- addMissingPMCFGs seqs is
+          return (seqs, ((m,id), info) : is)
 
 i2i :: Ident -> CId
 i2i = CId . ident2bs
-
-b2b :: A.BindType -> C.BindType
-b2b A.Explicit = C.Explicit
-b2b A.Implicit = C.Implicit
 
 mkType :: [Ident] -> A.Type -> C.Type
 mkType scope t =
@@ -125,12 +113,12 @@ mkType scope t =
 mkExp :: [Ident] -> A.Term -> C.Expr
 mkExp scope t = 
   case t of
-    Q _ c    -> C.EFun (i2i c)
-    QC _ c   -> C.EFun (i2i c)
+    Q (_,c)  -> C.EFun (i2i c)
+    QC (_,c) -> C.EFun (i2i c)
     Vr x     -> case lookup x (zip scope [0..]) of
                   Just i  -> C.EVar  i
                   Nothing -> C.EMeta 0
-    Abs b x t-> C.EAbs (b2b b) (i2i x) (mkExp (x:scope) t)
+    Abs b x t-> C.EAbs b (i2i x) (mkExp (x:scope) t)
     App t1 t2-> C.EApp (mkExp scope t1) (mkExp scope t2)
     EInt i   -> C.ELit (C.LInt (fromIntegral i))
     EFloat f -> C.ELit (C.LFlt f)
@@ -140,7 +128,7 @@ mkExp scope t =
 
 mkPatt scope p = 
   case p of
-    A.PP _ c ps -> let (scope',ps') = mapAccumL mkPatt scope ps
+    A.PP (_,c) ps->let (scope',ps') = mapAccumL mkPatt scope ps
                    in (scope',C.PApp (i2i c) ps')
     A.PV x      -> (x:scope,C.PVar (i2i x))
     A.PAs x p   -> let (scope',p') = mkPatt scope p
@@ -153,465 +141,159 @@ mkPatt scope p =
                    in (scope',C.PImplArg p')
     A.PTilde t  -> (  scope,C.PTilde (mkExp scope t))
 
-
 mkContext :: [Ident] -> A.Context -> ([Ident],[C.Hypo])
 mkContext scope hyps = mapAccumL (\scope (bt,x,ty) -> let ty' = mkType scope ty
                                                       in if x == identW
-                                                           then (  scope,(b2b bt,i2i x,ty'))
-                                                           else (x:scope,(b2b bt,i2i x,ty'))) scope hyps 
+                                                           then (  scope,(bt,i2i x,ty'))
+                                                           else (x:scope,(bt,i2i x,ty'))) scope hyps 
 
-mkTerm :: Term -> C.Term
-mkTerm tr = case tr of
-  Vr (IA _ i) -> C.V i
-  Vr (IAV _ _ i) -> C.V i
-  Vr (IC s) | isDigit (BS.last s) -> 
-    C.V ((read . BS.unpack . snd . BS.spanEnd isDigit) s)
-    ---- from gf parser of gfc
-  EInt i      -> C.C $ fromInteger i
-  R rs     -> C.R [mkTerm t | (_, (_,t)) <- rs]
-  P t l    -> C.P (mkTerm t) (C.C (mkLab l))
-  T _ cs   -> C.R [mkTerm t | (_,t) <- cs] ------
-  V _ cs   -> C.R [mkTerm t | t <- cs]
-  S t p    -> C.P (mkTerm t) (mkTerm p)
-  C s t    -> C.S $ concatMap flats [mkTerm x | x <- [s,t]]
-  FV ts    -> C.FV [mkTerm t | t <- ts]
-  K s      -> C.K (C.KS s)
------  K (KP ss _) -> C.K (C.KP ss []) ---- TODO: prefix variants
-  Empty    -> C.S []
-  App _ _  -> prtTrace tr $ C.C 66661          ---- for debugging
-  Abs _ _ t -> mkTerm t ---- only on toplevel
-  Alts (td,tvs) -> 
-    C.K (C.KP (strings td) [C.Alt (strings u) (strings v) | (u,v) <- tvs])
-  _ -> prtTrace tr $ C.S [C.K (C.KS (render (A.ppTerm Unqualified 0 tr <+> int 66662)))] ---- for debugging
- where
-   mkLab (LIdent l) = case BS.unpack l of
-     '_':ds -> (read ds) :: Int
-     _ -> prtTrace tr $ 66663
-   strings t = case t of
-     K s -> [s]
-     C u v -> strings u ++ strings v
-     Strs ss -> concatMap strings ss
-     _ -> prtTrace tr $ ["66660"]
-   flats t = case t of
-     C.S ts -> concatMap flats ts
-     _ -> [t]
+mkDef (Just eqs) = Just [C.Equ ps' (mkExp scope' e) | L _ (ps,e) <- eqs, let (scope',ps') = mapAccumL mkPatt [] ps]
+mkDef Nothing    = Nothing
 
--- encoding PGF-internal lincats as terms
-mkCType :: Type -> C.Term
-mkCType t = case t of
-  EInt i      -> C.C $ fromInteger i
-  RecType rs  -> C.R [mkCType t | (_, t) <- rs]
-  Table pt vt -> case pt of
-    EInt i -> C.R $ replicate (1 + fromInteger i) $ mkCType vt
-    RecType rs -> mkCType $ foldr Table vt (map snd rs) 
-    _ | Just i <- GM.isTypeInts pt -> C.R $ replicate (fromInteger i) $ mkCType vt
+mkArrity (Just a) = a
+mkArrity Nothing  = 0
 
-  Sort s | s == cStr -> C.S [] --- Str only
-  _ | Just i <- GM.isTypeInts t -> C.C $ fromInteger i
-  _ -> error  $ "mkCType " ++ show t
+data PattTree
+  = Ret  C.Expr
+  | Case (Map.Map QIdent [PattTree]) [PattTree]
 
--- encoding showable lincats (as in source gf) as terms
-mkParamLincat :: SourceGrammar -> Ident -> Ident -> C.Term
-mkParamLincat sgr lang cat = errVal (C.R [C.S []]) $ do 
-  typ <- Look.lookupLincat sgr lang cat
-  mkPType typ
- where
-  mkPType typ = case typ of
-    RecType lts -> do
-      ts <- mapM (mkPType . snd) lts
-      return $ C.R [ C.P (kks $ showIdent (label2ident l)) t | ((l,_),t) <- zip lts ts]
-    Table (RecType lts) v -> do
-      ps <- mapM (mkPType . snd) lts
-      v' <- mkPType v
-      return $ foldr (\p v -> C.S [p,v]) v' ps
-    Table p v -> do
-      p' <- mkPType p
-      v' <- mkPType v
-      return $ C.S [p',v']
-    Sort s | s == cStr -> return $ C.S []
-    _ -> return $ 
-      C.FV $ map (kks . renderStyle style{mode=OneLineMode} . ppTerm Unqualified 6) $ 
-             errVal [] $ Look.allParamValues sgr typ
-  kks = C.K . C.KS
+compilePatt :: [Equation] -> [PattTree]
+compilePatt (([],t):_) = [Ret (mkExp [] t)]
+compilePatt eqs        = whilePP eqs Map.empty
+  where
+    whilePP []                         cns     = [mkCase cns []]
+    whilePP (((PP c ps' : ps), t):eqs) cns     = whilePP eqs (Map.insertWith (++) c [(ps'++ps,t)] cns)
+    whilePP eqs                        cns     = whilePV eqs cns []
 
--- return just one module per language
+    whilePV []                         cns vrs = [mkCase cns (reverse vrs)]
+    whilePV (((PV x     : ps), t):eqs) cns vrs = whilePV eqs cns ((ps,t) : vrs)
+    whilePV eqs                        cns vrs = mkCase cns (reverse vrs) : compilePatt eqs
 
-reorder :: Ident -> SourceGrammar -> SourceGrammar
-reorder abs cg = M.MGrammar $ 
-    (abs, M.ModInfo M.MTAbstract M.MSComplete aflags [] Nothing [] [] adefs):
-      [(c, M.ModInfo (M.MTConcrete abs) M.MSComplete fs [] Nothing [] [] (sorted2tree js))
-            | (c,(fs,js)) <- cncs] 
-     where
-       mos = M.modules cg
-       adefs = sorted2tree $ sortIds $
-                 predefADefs ++ Look.allOrigInfos cg abs
-       predefADefs = 
-         [(c, AbsCat (Just (L (0,0) []))) | c <- [cFloat,cInt,cString]]
-       aflags = 
-         concatOptions [M.flags mo | (_,mo) <- M.modules cg, M.isModAbs mo]
-
-       cncs = sortIds [(lang, concr lang) | lang <- M.allConcretes cg abs]
-       concr la = (flags, 
-                   sortIds (predefCDefs ++ jments)) where 
-         jments = Look.allOrigInfos cg la
-         flags  = concatOptions 
-                    [M.flags mo | 
-                     (i,mo) <- mos, M.isModCnc mo, 
-                     Just r <- [lookup i (M.allExtendSpecs cg la)]]
-
-         predefCDefs = 
-           [(c, CncCat (Just (L (0,0) GM.defLinType)) Nothing Nothing) | c <- [cInt,cFloat,cString]]
-
-       sortIds = sortBy (\ (f,_) (g,_) -> compare f g) 
+    mkCase cns vrs = Case (fmap compilePatt cns) (compilePatt vrs)
 
 
--- one grammar per language - needed for symtab generation
-repartition :: Ident -> SourceGrammar -> [SourceGrammar]
-repartition abs cg = 
-  [M.partOfGrammar cg (lang,mo) | 
-    let mos = M.modules cg,
-    lang <- case M.allConcretes cg abs of
-      [] -> [abs]  -- to make pgf nonempty even when there are no concretes
-      cncs -> cncs,
-    let mo = errVal 
-         (error (render (text "no module found for" <+> A.ppIdent lang))) $ M.lookupModule cg lang
-    ]
-
--- translate tables and records to arrays, parameters and labels to indices
-
-canon2canon :: Options -> Ident -> SourceGrammar -> SourceGrammar
-canon2canon opts abs cg0 = 
-   (recollect . map cl2cl . repartition abs . purgeGrammar abs) cg0 
- where
-  recollect = M.MGrammar . nubBy (\ (i,_) (j,_) -> i==j) . concatMap M.modules
-  cl2cl = M.MGrammar . js2js . map (c2c p2p) . M.modules
-    
-  js2js ms = map (c2c (j2j (M.MGrammar ms))) ms
-
-  c2c f2 (c,mo) = (c, M.replaceJudgements mo $ mapTree f2 (M.jments mo))
-
-  j2j cg (f,j) = 
-    let debug = if verbAtLeast opts Verbose then trace ("+ " ++ showIdent f) else id in
-    case j of
-      CncFun x (Just (L loc tr)) z -> CncFun x (Just (L loc (debug (t2t (unfactor cg0 tr))))) z
-      CncCat (Just (L locty ty)) (Just (L locx x)) y -> CncCat (Just (L locty (ty2ty ty))) (Just (L locx (t2t (unfactor cg0 x)))) y
-      _ -> j
-   where
-      cg1 = cg
-      t2t = term2term f cg1 pv
-      ty2ty = type2type cg1 pv
-      pv@(labels,untyps,typs) = trs $ paramValues cg1
-
-      unfactor :: SourceGrammar -> Term -> Term
-      unfactor gr t = case t of
-        T (TTyped ty) [(PV x,u)] -> V ty [restore x v (unfac u) | v <- vals ty]
-        _ -> GM.composSafeOp unfac t
-       where
-         unfac = unfactor gr
-         vals  = err error id . Look.allParamValues gr
-         restore x u t = case t of
-           Vr y | y == x -> u
-           _ -> GM.composSafeOp (restore x u) t
-
-    -- flatten record arguments of param constructors
-  p2p (f,j) = case j of
-      ResParam (Just ps) (Just vs) -> 
-        ResParam (Just [L loc (c,concatMap unRec cont) | L loc (c,cont) <- ps]) (Just (map unrec vs))
-      _ -> j
-  unRec (bt,x,ty) = case ty of
-      RecType fs -> [ity | (_,typ) <- fs, ity <- unRec (Explicit,identW,typ)] 
-      _ -> [(bt,x,ty)]
-  unrec t = case t of
-     App f (R fs) -> GM.mkApp (unrec f) [unrec u | (_,(_,u)) <- fs]
-     _ -> GM.composSafeOp unrec t
+genCncCats gr am cm cdefs =
+  let (index,cats) = mkCncCats 0 cdefs
+  in (index, Map.fromList cats)
+  where
+    mkCncCats index []                                                = (index,[])
+    mkCncCats index (((m,id),CncCat (Just (L _ lincat)) _ _ _):cdefs) 
+      | id == cInt    = 
+            let cc            = pgfCncCat gr lincat fidInt
+                (index',cats) = mkCncCats index cdefs
+            in (index', (i2i id,cc) : cats)
+      | id == cFloat  = 
+            let cc            = pgfCncCat gr lincat fidFloat
+                (index',cats) = mkCncCats index cdefs
+            in (index', (i2i id,cc) : cats)
+      | id == cString = 
+            let cc            = pgfCncCat gr lincat fidString
+                (index',cats) = mkCncCats index cdefs
+            in (index', (i2i id,cc) : cats)
+      | otherwise     =
+            let cc@(C.CncCat s e _) = pgfCncCat gr lincat index
+                (index',cats)       = mkCncCats (e+1) cdefs
+            in (index', (i2i id,cc) : cats)
+    mkCncCats index (_                      :cdefs) = mkCncCats index cdefs
 
 
-----
-  trs v = traceD (render (tr v)) v
+genCncFuns gr am cm seqs0 cdefs fid_cnt cnccats =
+  let (fid_cnt1,funs_cnt1,seqs1,funs1,lindefs) = mkCncCats cdefs fid_cnt  0 seqs0 [] IntMap.empty
+      (fid_cnt2,funs_cnt2,seqs2,funs2,prods)   = mkCncFuns cdefs fid_cnt1 funs_cnt1 seqs1 funs1 lindefs Map.empty IntMap.empty
+  in (fid_cnt2,prods,lindefs,mkSetArray seqs2,array (0,funs_cnt2-1) funs2)
+  where
+    mkCncCats []                                                        fid_cnt funs_cnt seqs funs lindefs =
+      (fid_cnt,funs_cnt,seqs,funs,lindefs)
+    mkCncCats (((m,id),CncCat _ _ _ (Just (PMCFG prods0 funs0))):cdefs) fid_cnt funs_cnt seqs funs lindefs =
+      let !funs_cnt'     = let (s_funid, e_funid) = bounds funs0
+                           in funs_cnt+(e_funid-s_funid+1)
+          lindefs'       = foldl' (toLinDef (am,id) funs_cnt) lindefs prods0
+          !(seqs',funs') = foldl' (toCncFun funs_cnt (m,mkLinDefId id)) (seqs,funs) (assocs funs0)
+      in mkCncCats cdefs fid_cnt funs_cnt' seqs' funs' lindefs'
+    mkCncCats (_                                                :cdefs) fid_cnt funs_cnt seqs funs lindefs = 
+      mkCncCats cdefs fid_cnt funs_cnt seqs funs lindefs
 
-  tr (labels,untyps,typs) =
-     (text "LABELS:" <+>
-        vcat [A.ppIdent c <> char '.' <> hsep (map A.ppLabel l) <+> char '=' <+> text (show i)  | ((c,l),i) <- Map.toList labels]) $$
-     (text "UNTYPS:" <+>
-        vcat [A.ppTerm Unqualified 0 t <+> char '=' <+> text (show i) | (t,i) <- Map.toList untyps]) $$
-     (text "TYPS:  " <+>
-        vcat [A.ppTerm Unqualified 0 t <+> char '=' <+> text (show (Map.assocs i)) | (t,i) <- Map.toList typs])
-----
+    mkCncFuns []                                                        fid_cnt funs_cnt seqs funs lindefs crc prods =
+      (fid_cnt,funs_cnt,seqs,funs,prods)
+    mkCncFuns (((m,id),CncFun _ _ _ (Just (PMCFG prods0 funs0))):cdefs) fid_cnt funs_cnt seqs funs lindefs crc prods =
+      let ---Ok ty_C        = fmap GM.typeForm (Look.lookupFunType gr am id)
+          ty_C           = err error (\x -> x) $ fmap GM.typeForm (Look.lookupFunType gr am id)
+          !funs_cnt'     = let (s_funid, e_funid) = bounds funs0
+                           in funs_cnt+(e_funid-s_funid+1)
+          !(fid_cnt',crc',prods') 
+                         = foldl' (toProd lindefs ty_C funs_cnt)
+                                  (fid_cnt,crc,prods) prods0
+          !(seqs',funs') = foldl' (toCncFun funs_cnt (m,id)) (seqs,funs) (assocs funs0)
+      in mkCncFuns cdefs fid_cnt' funs_cnt' seqs' funs' lindefs crc' prods'
+    mkCncFuns (_                                                :cdefs) fid_cnt funs_cnt seqs funs lindefs crc prods = 
+      mkCncFuns cdefs fid_cnt funs_cnt seqs funs lindefs crc prods
 
-purgeGrammar :: Ident -> SourceGrammar -> SourceGrammar
-purgeGrammar abstr gr = 
-  (M.MGrammar . list . filter complete . purge . M.modules) gr 
- where
-  list ms = traceD (render (text "MODULES" <+> hsep (punctuate comma (map (ppIdent . fst) ms)))) ms
-  purge = nubBy (\x y -> fst x == fst y) . filter (flip elem needed . fst)
-  needed = nub $ concatMap (requiredCanModules isSingle gr) acncs
-  acncs = abstr : M.allConcretes gr abstr
-  isSingle = True
-  complete (i,m) = M.isCompleteModule m --- not . isIncompleteCanon
-
-type ParamEnv =
-  (Map.Map (Ident,[Label]) (Type,Integer), -- numbered labels
-   Map.Map Term Integer,                   -- untyped terms to values
-   Map.Map Type (Map.Map Term Integer))    -- types to their terms to values
-
---- gathers those param types that are actually used in lincats and lin terms
-paramValues :: SourceGrammar -> ParamEnv
-paramValues cgr = (labels,untyps,typs) where
-  partyps = nub $ 
-            --- [App (Q (IC "Predef") (IC "Ints")) (EInt i) | i <- [1,9]] ---linTypeInt 
-            [ty | 
-              (_,(_,CncCat (Just (L _ ty0)) _ _)) <- jments,
-              ty  <- typsFrom ty0
-            ] ++ [
-             Q m ty | 
-              (m,(ty,ResParam _ _)) <- jments
-            ] ++ [ty | 
-              (_,(_,CncFun _ (Just (L _ tr)) _)) <- jments,
-              ty  <- err (const []) snd $ appSTM (typsFromTrm tr) []
-            ]
-  params = [(ty, errVal (traceD ("UNKNOWN PARAM TYPE" +++ show ty) []) $ 
-                                         Look.allParamValues cgr ty) | ty <- partyps]
-  typsFrom ty = (if isParam ty then (ty:) else id) $ case ty of
-    Table p t  -> typsFrom p ++ typsFrom t
-    RecType ls -> concat [typsFrom t | (_, t) <- ls]
-    _ -> []
- 
-  isParam ty = case ty of
-    Q _ _ -> True
-    QC _ _ -> True
-    RecType rs -> all isParam (map snd rs)
-    _ -> False
-
-  typsFromTrm :: Term -> STM [Type] Term
-  typsFromTrm tr = case tr of
-    R fs -> mapM_ (typsFromField . snd) fs >> return tr 
+    toProd lindefs (ctxt_C,res_C,_) offs st (Production fid0 funid0 args0) =
+      let !((fid_cnt,crc,prods),args) = mapAccumL mkArg st (zip ctxt_C args0) 
+          set0    = Set.fromList (map (C.PApply (offs+funid0)) (sequence args))
+          fid     = mkFId res_C fid0
+          !prods' = case IntMap.lookup fid prods of
+                     Just set -> IntMap.insert fid (Set.union set0 set) prods
+                     Nothing  -> IntMap.insert fid set0 prods
+      in (fid_cnt,crc,prods')
       where
-        typsFromField (mty, t) = case mty of
-          Just x -> updateSTM (x:) >> typsFromTrm t
-          _ -> typsFromTrm t
-    V ty ts -> updateSTM (ty:) >> mapM_ typsFromTrm ts >> return tr
-    T (TTyped ty) cs -> 
-      updateSTM (ty:) >> mapM_ typsFromTrm [t | (_, t) <- cs] >> return tr
-    T (TComp ty) cs -> 
-      updateSTM (ty:) >> mapM_ typsFromTrm [t | (_, t) <- cs] >> return tr
-    _ -> GM.composOp typsFromTrm tr
+        mkArg st@(fid_cnt,crc,prods) ((_,_,ty),fid0s ) =
+          case fid0s of
+            [fid0] -> (st,map (flip C.PArg (mkFId arg_C fid0)) ctxt)
+            fid0s  -> case Map.lookup fids crc of
+                        Just fid -> (st,map (flip C.PArg fid) ctxt)
+                        Nothing  -> let !crc'   = Map.insert fids fid_cnt crc
+                                        !prods' = IntMap.insert fid_cnt (Set.fromList (map C.PCoerce fids)) prods
+                                    in ((fid_cnt+1,crc',prods'),map (flip C.PArg fid_cnt) ctxt)
+          where
+            (hargs_C,arg_C) = GM.catSkeleton ty
+            ctxt = mapM (mkCtxt lindefs) hargs_C
+            fids = map (mkFId arg_C) fid0s
 
-  mods = traceD (render (hsep (map (ppIdent . fst) ms))) ms where ms = M.modules cgr
+    mkLinDefId id = 
+      identC (BS.append (BS.pack "lindef ") (ident2bs id))
 
-  jments = 
-    [(m,j) | (m,mo) <- mods, j <- tree2list $ M.jments mo]
-  typs = 
-    Map.fromList [(ci,Map.fromList (zip vs [0..])) | (ci,vs) <- params]
-  untyps = 
-    Map.fromList $ concatMap Map.toList [typ | (_,typ) <- Map.toList typs]
-  lincats = 
-    [(cat,[f | let RecType fs = GM.defLinType, f <- fs]) | cat <- [cInt,cFloat, cString]] ++
-    reverse ---- TODO: really those lincats that are reached
-            ---- reverse is enough to expel overshadowed ones... 
-      [(cat,ls) | (_,(cat,CncCat (Just (L _ ty)) _ _)) <- jments, 
-                  RecType ls <- [unlockTy ty]]
-  labels = Map.fromList $ concat 
-    [((cat,[lab]),(typ,i)): 
-      [((cat,[LVar v]),(typ,toInteger (mx + v))) | v <- [0,1]] ++ ---- 1 or 2 vars 
-      [((cat,[lab,lab2]),(ty,j)) | 
-        rs <- getRec typ, ((lab2, ty),j) <- zip rs [0..]] 
-      ++
-      ---- one more level, but: ...
-      [((cat,[lab,lab2,lab3]),(ty,j)) | 
-        rss <- getRec typ, ((lab2, ty0),j0) <- zip rss [0..],
-        (_,ty2) <- rss,
-        rs  <- getRec ty2, ((lab3, ty),j) <- zip rs [0..]] 
-      | 
-        (cat,ls) <- lincats, ((lab, typ),i) <- zip ls [0..], let mx = length ls]
-    -- go to tables recursively
-    ---- ... TODO: go to deeper records
-   where
-     getRec typ = case typ of
-       RecType rs -> [rs] ---- [unlockTyp rs]  -- (sort (unlockTyp ls))
-       Table _ t  -> getRec t
-       _ -> []
+    toLinDef res offs lindefs (Production fid0 funid0 _) =
+      IntMap.insertWith (++) fid [offs+funid0] lindefs
+      where
+        fid = mkFId res fid0
 
-type2type :: SourceGrammar -> ParamEnv -> Type -> Type
-type2type cgr env@(labels,untyps,typs) ty = case ty of
-  RecType rs ->
-    RecType [(mkLab i, t2t t) | (i,(l, t)) <- zip [0..] (unlockTyp rs)]
-  Table pt vt -> Table (t2t pt) (t2t vt)
-  QC _ _ -> look ty
-  _ -> ty
- where
-   t2t = type2type cgr env
-   look ty = EInt $ (+ (-1)) $ toInteger $ case Map.lookup ty typs of
-     Just vs -> length $ Map.assocs vs
-     _ -> trace ("unknown partype " ++ show ty) 66669
+    mkFId (_,cat) fid0 =
+      case Map.lookup (i2i cat) cnccats of
+        Just (C.CncCat s e _) -> s+fid0
+        Nothing               -> error ("GrammarToPGF.mkFId: missing category "++showIdent cat)
 
-term2term :: Ident -> SourceGrammar -> ParamEnv -> Term -> Term
-term2term fun cgr env@(labels,untyps,typs) tr = case tr of
-  App _ _ -> mkValCase (unrec tr)
-  QC  _ _ -> mkValCase tr 
-  R rs    -> R [(mkLab i, (Nothing, t2t t)) | 
-                 (i,(l,(_,t))) <- zip [0..] (GM.sortRec (unlock rs))]
-  P  t l   -> r2r tr
+    mkCtxt lindefs (_,cat) =
+      case Map.lookup (i2i cat) cnccats of
+        Just (C.CncCat s e _) -> [(C.fidVar,fid) | fid <- [s..e], Just _ <- [IntMap.lookup fid lindefs]]
+        Nothing               -> error "GrammarToPGF.mkCtxt failed"
 
-  T (TWild _) _ -> error $ (render (text "wild" <+> ppTerm Qualified 0 tr))
-  T (TComp  ty) cs  -> t2t $ V ty $ map snd cs ---- should be elim'ed in tc
-  T (TTyped ty) cs  -> t2t $ V ty $ map snd cs ---- should be elim'ed in tc
-  V ty ts  -> mkCurry $ V ty [t2t t | t <- ts]
-  S t p    -> mkCurrySel (t2t t) (t2t p)
+    toCncFun offs (m,id) (seqs,funs) (funid0,lins0) =
+      case lookupModule gr m of
+        Ok (ModInfo{mseqs=Just mseqs}) -> let !(!seqs',lins) = mapAccumL (mkLin mseqs) seqs (elems lins0)
+                                          in (seqs',(offs+funid0,C.CncFun (i2i id) (mkArray lins)):funs)
+        _                              -> -- this function should have been compiled during the linking phase
+                                          -- so its sequences must be in seqs already
+                                          (seqs,(offs+funid0,C.CncFun (i2i id) lins0):funs)
+      where
+        mkLin mseqs seqs seqid =
+          let seq = mseqs ! seqid
+          in case Map.lookup seq seqs of
+               Just seqid -> (seqs,seqid)
+               Nothing    -> let !seqid = Map.size seqs
+                                 !seqs' = Map.insert seq seqid seqs
+                             in (seqs',seqid)
 
-  _ -> GM.composSafeOp t2t tr
- where
-   t2t = term2term fun cgr env
+genPrintNames cdefs =
+  Map.fromAscList [(i2i id, name) | ((m,id),info) <- cdefs, name <- prn info]
+  where
+    prn (CncFun _ _ (Just (L _ tr)) _) = [flatten tr]
+    prn (CncCat _ _ (Just (L _ tr)) _) = [flatten tr]
+    prn _                              = []
 
-   unrec t = case t of
-     App f (R fs) -> GM.mkApp (unrec f) [unrec u | (_,(_,u)) <- fs]
-     _ -> GM.composSafeOp unrec t
+    flatten (K s)      = s
+    flatten (Alts x _) = flatten x
+    flatten (C x y)    = flatten x +++ flatten y
 
-   mkValCase tr = case appSTM (doVar tr) [] of
-     Ok (tr', st@(_:_)) -> t2t $ comp $ foldr mkCase tr' st
-     _ -> valNum $ comp tr
-
-   --- this is mainly needed for parameter record projections
-   ---- was: 
-   comp t = errVal t $ Compute.computeConcreteRec cgr t
-
-   doVar :: Term -> STM [((Type,[Term]),(Term,Term))] Term
-   doVar tr = case getLab tr of
-     Ok (cat, lab) -> do
-       k <- readSTM >>= return . length
-       let tr' = Vr $ identC $ (BS.pack (show k)) -----
-
-       let tyvs = case Map.lookup (cat,lab) labels of
-             Just (ty,_) -> case Map.lookup ty typs of
-               Just vs -> (ty,[t | 
-                            (t,_) <- sortBy (\x y -> compare (snd x) (snd y)) 
-                                            (Map.assocs vs)])
-               _ -> error $ render (text "doVar1" <+> A.ppTerm Unqualified 0 ty)
-             _ -> error $ render (text "doVar2" <+> A.ppTerm Unqualified 0 tr <+> text (show (cat,lab))) ---- debug
-       updateSTM ((tyvs, (tr', tr)):) 
-       return tr'
-     _ -> GM.composOp doVar tr
-
-   r2r tr@(P (S (V ty ts) v) l) = t2t $ S (V ty [comp (P t l) | t <- ts]) v
-
-   r2r tr@(P p _) = case getLab tr of
-     Ok (cat,labs) -> P (t2t p) . mkLab $ 
-          maybe (prtTrace tr $ 66664) snd $ 
-            Map.lookup (cat,labs) labels
-     _ -> K (render (A.ppTerm Unqualified 0 tr <+> prtTrace tr (int 66665)))
-
-   -- this goes recursively into tables (ignored) and records (accumulated)
-   getLab tr = case tr of
-     Vr (IA cat _) -> return (identC cat,[])
-     Vr (IAV cat _ _) -> return (identC cat,[])
-     Vr (IC s) -> return (identC cat,[]) where
-       cat = BS.takeWhile (/='_') s ---- also to match IAVs; no _ in a cat tolerated
-             ---- init (reverse (dropWhile (/='_') (reverse s))) ---- from gf parser
-----     Vr _ -> error $ "getLab " ++ show tr
-     P p lab2 -> do
-       (cat,labs) <- getLab p
-       return (cat,labs++[lab2]) 
-     S p _ -> getLab p
-     _ -> Bad "getLab"
-
-
-   mkCase ((ty,vs),(x,p)) tr = 
-     S (V ty [mkBranch x v tr | v <- vs]) p
-   mkBranch x t tr = case tr of
-     _ | tr == x -> t
-     _ -> GM.composSafeOp (mkBranch x t) tr     
-
-   valNum tr = maybe (valNumFV $ tryFV tr) EInt $ Map.lookup tr untyps
-    where
-      tryFV tr = case GM.appForm tr of
-        (c@(QC _ _), ts) -> [GM.mkApp c ts' | ts' <- combinations (map tryFV ts)]
-        (FV ts,_) -> ts
-        _ -> [tr]
-      valNumFV ts = case ts of
-        [tr] -> let msg = render (text "DEBUG" <+> ppIdent fun <> text ": error in valNum" <+> ppTerm Qualified 0 tr) in 
-                trace msg $ error (showIdent fun)
-        _ -> FV $ map valNum ts
-
-   mkCurry trm = case trm of
-     V (RecType [(_,ty)]) ts -> V ty ts 
-     V (RecType ((_,ty):ltys)) ts -> 
-       V ty [mkCurry (V (RecType ltys) cs) | 
-         cs <- chop (product (map (lengthtyp . snd) ltys)) ts] 
-     _ -> trm
-   lengthtyp ty = case Map.lookup ty typs of
-     Just m -> length (Map.assocs m)
-     _ -> error $ "length of type " ++ show ty
-   chop i xs = case splitAt i xs of 
-     (xs1,[])  -> [xs1]
-     (xs1,xs2) -> xs1:chop i xs2
-
-
-   mkCurrySel t p = S t p -- done properly in CheckGFCC
-
-
-mkLab k = LIdent (BS.pack ("_" ++ show k))
-
--- remove lock fields; in fact, any empty records and record types
-unlock = filter notlock where
-  notlock (l,(_, t)) = case t of --- need not look at l
-     R [] -> False
-     RecType [] -> False
-     _ -> True
-
-unlockTyp = filter notlock
-  
-notlock (l, t) = case t of --- need not look at l
-     RecType [] -> False
-     _ -> True
-
-unlockTy ty = case ty of
-  RecType ls -> RecType $ GM.sortRec [(l, unlockTy t) | (l,t) <- ls, notlock (l,t)]
-  _ -> GM.composSafeOp unlockTy ty
-
-
-prtTrace tr n = 
-  trace (render (text "-- INTERNAL COMPILER ERROR" <+> A.ppTerm Unqualified 0 tr $$ text (show n))) n
-prTrace  tr n = trace (render (text "-- OBSERVE" <+> A.ppTerm Unqualified 0 tr <+> text (show n) <+> text (show tr))) n
-
-
--- | this function finds out what modules are really needed in the canonical gr.
--- its argument is typically a concrete module name
-requiredCanModules :: Bool -> M.MGrammar a -> Ident -> [Ident]
-requiredCanModules isSingle gr c = nub $ filter notReuse ops ++ exts where
-  exts = M.allExtends gr c
-  ops  = if isSingle 
-         then map fst (M.modules gr) 
-         else iterFix (concatMap more) $ exts
-  more i = errVal [] $ do
-    m <- M.lookupModule gr i
-    return $ M.extends m ++ [o | o <- map M.openedModule (M.opens m)]
-  notReuse i = errVal True $ do
-    m <- M.lookupModule gr i
-    return $ M.isModRes m -- to exclude reused Cnc and Abs from required
-
-
-realize :: C.Term -> String
-realize = concat . take 1 . realizes
-
-realizes :: C.Term -> [String]
-realizes = map (unwords . untokn) . realizest
-
-realizest :: C.Term -> [[C.Tokn]]
-realizest trm = case trm of
-  C.R ts     -> realizest (ts !! 0)
-  C.S ss     -> map concat $ combinations $ map realizest ss
-  C.K t      -> [[t]]
-  C.W s t    -> [[C.KS (s ++ r)] | [C.KS r] <- realizest t]
-  C.FV ts    -> concatMap realizest ts
-  C.TM s     -> [[C.KS s]]
-  _ -> [[C.KS $ "REALIZE_ERROR " ++ show trm]] ---- debug
-
-untokn :: [C.Tokn] -> [String]
-untokn ts = case ts of
-  C.KP d _  : [] -> d
-  C.KP d vs : ws -> let ss@(s:_) = untokn ws in sel d vs s ++ ss
-  C.KS s    : ws -> s : untokn ws
-  []             -> []
- where
-   sel d vs w = case [v | C.Alt v cs <- vs, any (\c -> isPrefixOf c w) cs] of
-     v:_ -> v
-     _   -> d
+mkArray    lst = listArray (0,length lst-1) lst
+mkSetArray map = array (0,Map.size map-1) [(v,k) | (k,v) <- Map.toList map]

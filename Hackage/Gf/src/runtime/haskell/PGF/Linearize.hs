@@ -1,8 +1,15 @@
-module PGF.Linearize(linearizes,markLinearizes,tabularLinearizes) where
+module PGF.Linearize
+            ( linearize
+            , linearizeAll
+            , linearizeAllLang
+            , bracketedLinearize
+            , tabularLinearizes
+            ) where
 
 import PGF.CId
 import PGF.Data
 import PGF.Macros
+import PGF.Expr
 import Data.Array.IArray
 import Data.List
 import Control.Monad
@@ -10,99 +17,108 @@ import qualified Data.Map as Map
 import qualified Data.IntMap as IntMap
 import qualified Data.Set as Set
 
--- linearization and computation of concrete PGF Terms
+--------------------------------------------------------------------
+-- The API
+--------------------------------------------------------------------
 
-type LinTable = Array LIndex [Tokn]
+-- | Linearizes given expression as string in the language
+linearize :: PGF -> Language -> Tree -> String
+linearize pgf lang = concat . take 1 . map (unwords . concatMap flattenBracketedString . snd . untokn "" . firstLin) . linTree pgf lang
 
-linearizes :: PGF -> CId -> Expr -> [String]
-linearizes pgf lang = map (unwords . untokn . (! 0)) . linTree pgf lang (\_ _ lint -> lint)
+-- | The same as 'linearizeAllLang' but does not return
+-- the language.
+linearizeAll :: PGF -> Tree -> [String]
+linearizeAll pgf = map snd . linearizeAllLang pgf
 
-linTree :: PGF -> Language -> (Maybe CId -> [Int] -> LinTable -> LinTable) -> Expr -> [LinTable]
-linTree pgf lang mark e = lin0 [] [] [] Nothing e
+-- | Linearizes given expression as string in all languages
+-- available in the grammar.
+linearizeAllLang :: PGF -> Tree -> [(Language,String)]
+linearizeAllLang pgf t = [(lang,linearize pgf lang t) | lang <- Map.keys (concretes pgf)]
+
+-- | Linearizes given expression as a bracketed string in the language
+bracketedLinearize :: PGF -> Language -> Tree -> BracketedString
+bracketedLinearize pgf lang = head . concat . map (snd . untokn "" . firstLin) . linTree pgf lang
+  where
+--  head []       = error "cannot linearize"
+    head []       = Leaf ""
+            -- so that linearize = flattenBracketedString . bracketedLinearize
+    head (bs:bss) = bs
+
+firstLin (_,arr)
+  | inRange (bounds arr) 0 = arr ! 0
+  | otherwise              = LeafKS []
+
+-- | Creates a table from feature name to linearization. 
+-- The outher list encodes the variations
+tabularLinearizes :: PGF -> Language -> Expr -> [[(String,String)]]
+tabularLinearizes pgf lang e = map cnv (linTree pgf lang e)
+  where
+    cnv ((cat,_),lin) = zip (lbls cat) $ map (unwords . concatMap flattenBracketedString . snd . untokn "") (elems lin)
+
+    lbls cat = case Map.lookup cat (cnccats (lookConcr pgf lang)) of
+                 Just (CncCat _ _ lbls) -> elems lbls
+                 Nothing                -> error "No labels"
+
+--------------------------------------------------------------------
+-- Implementation
+--------------------------------------------------------------------
+
+linTree :: PGF -> Language -> Expr -> [(CncType, Array LIndex BracketedTokn)]
+linTree pgf lang e = 
+  nub [(ct,amapWithIndex (\label -> Bracket_ cat fid label fun es) lin) | (_,(ct@(cat,fid),fun,es,(xs,lin))) <- lin Nothing 0 e [] [] e []]
   where
     cnc   = lookMap (error "no lang") lang (concretes pgf)
     lp    = lproductions cnc
 
-    lin0 path xs ys mb_fid (EAbs _ x e)  = lin0 path (showCId x:xs) ys mb_fid e
-    lin0 path xs ys mb_fid (ETyped e _)  = lin0 path xs ys mb_fid e
-    lin0 path xs ys mb_fid e | null xs   = lin path ys mb_fid e []
-                             | otherwise = apply path (xs ++ ys) mb_fid _B (e:[ELit (LStr x) | x <- xs])
+    lin mb_cty n_fid e0 ys xs (EAbs _ x e) es = lin   mb_cty n_fid e0 ys (x:xs) e      es
+    lin mb_cty n_fid e0 ys xs (EApp e1 e2) es = lin   mb_cty n_fid e0 ys    xs  e1 (e2:es)
+    lin mb_cty n_fid e0 ys xs (EImplArg e) es = lin   mb_cty n_fid e0 ys    xs  e      es
+    lin mb_cty n_fid e0 ys xs (ETyped e _) es = lin   mb_cty n_fid e0 ys    xs  e      es
+    lin mb_cty n_fid e0 ys xs (EFun f)     es = apply mb_cty n_fid e0 ys    xs  f      es
+    lin mb_cty n_fid e0 ys xs (EMeta i)    es = def   mb_cty n_fid e0 ys    xs  ('?':show i)
+    lin mb_cty n_fid e0 ys xs (EVar  i)    _  = def   mb_cty n_fid e0 ys    xs  (showCId ((xs++ys) !! i))
+    lin mb_cty n_fid e0 ys xs (ELit l)     [] = case l of
+                                                   LStr s -> return (n_fid+1,((cidString,n_fid),wildCId,[e0],([],ss s)))
+                                                   LInt n -> return (n_fid+1,((cidInt,   n_fid),wildCId,[e0],([],ss (show n))))
+                                                   LFlt f -> return (n_fid+1,((cidFloat, n_fid),wildCId,[e0],([],ss (show f))))
 
-    lin path xs mb_fid (EApp e1 e2) es = lin path xs mb_fid e1 (e2:es)
-    lin path xs mb_fid (ELit l)     [] = case l of
-                                           LStr s -> return (mark Nothing path (ss s))
-                                           LInt n -> return (mark Nothing path (ss (show n)))
-                                           LFlt f -> return (mark Nothing path (ss (show f)))
-    lin path xs mb_fid (EMeta i)    es = apply path xs mb_fid _V (ELit (LStr ('?':show i)):es)
-    lin path xs mb_fid (EFun f)     es = map (mark (Just f) path) (apply path xs mb_fid f  es)
-    lin path xs mb_fid (EVar  i)    es = apply path xs mb_fid _V (ELit (LStr (xs !! i))   :es)
-    lin path xs mb_fid (ETyped e _) es = lin path xs mb_fid e es
-    lin path xs mb_fid (EImplArg e) es = lin path xs mb_fid e es
+    ss s = listArray (0,0) [[LeafKS [s]]]
 
-    ss s = listArray (0,0) [[KS s]]
-
-    apply path xs mb_fid f es =
+    apply :: Maybe CncType -> FId -> Expr -> [CId] -> [CId] -> CId -> [Expr] -> [(FId,(CncType, CId, [Expr], LinTable))]
+    apply mb_cty n_fid e0 ys xs f es =
       case Map.lookup f lp of
-        Just prods -> case lookupProds mb_fid prods of
-                        Just set -> do prod <- Set.toList set
-                                       case prod of
-                                         PApply funid fids -> do guard (length fids == length es)
-                                                                 args <- sequence (zipWith3 (\i fid e -> lin0 (sub i path) [] xs (Just fid) e) [0..] fids es)
-                                                                 let (CncFun _ lins) = cncfuns cnc ! funid
-                                                                 return (listArray (bounds lins) [computeSeq seqid args | seqid <- elems lins])
-                                         PCoerce fid       -> apply path xs (Just fid) f es
-                        Nothing  -> mzero
-        Nothing    -> apply path xs mb_fid _V [ELit (LStr ("[" ++ showCId f ++ "]"))]  -- fun without lin
+        Just prods -> do (funid,(cat,fid),ctys) <- getApps prods
+                         (n_fid,args) <- descend n_fid (zip ctys es)
+                         return (n_fid+1,((cat,n_fid),f,[e0],mkLinTable cnc (const True) xs funid args))
+        Nothing    -> def mb_cty n_fid e0 ys xs ("[" ++ showCId f ++ "]")  -- fun without lin
       where
-        lookupProds (Just fid) prods = IntMap.lookup fid prods
-        lookupProds Nothing    prods
-            | f == _B || f == _V     = Nothing
-            | otherwise              = Just (Set.filter isApp (Set.unions (IntMap.elems prods)))
-
-        sub i path
-          | f == _B || f == _V =   path
-          | otherwise          = i:path
-
-        isApp (PApply _ _) = True
-        isApp _            = False
-
-        computeSeq seqid args = concatMap compute (elems seq)
+        getApps prods =
+          case mb_cty of
+            Just (cat,fid) -> maybe [] (concatMap (toApp fid) . Set.toList) (IntMap.lookup fid prods)
+            Nothing        -> concat [toApp fid prod | (fid,set) <- IntMap.toList prods, prod <- Set.toList set]
           where
-            seq = sequences cnc ! seqid
+            toApp fid (PApply funid pargs) =
+              let Just (ty,_,_,_,_) = Map.lookup f (funs (abstract pgf))
+                  (args,res) = catSkeleton ty
+              in [(funid,(res,fid),zip args [fid | PArg _ fid <- pargs])]
+            toApp _   (PCoerce fid) = 
+              maybe [] (concatMap (toApp fid) . Set.toList) (IntMap.lookup fid prods)
 
-            compute (SymCat d r)    = (args !! d) ! r
-            compute (SymLit d r)    = (args !! d) ! r
-            compute (SymKS ts)      = map KS ts
-            compute (SymKP ts alts) = [KP ts alts]
+        descend n_fid []            = return (n_fid,[])
+        descend n_fid ((cty,e):fes) = do (n_fid,arg)  <- lin (Just cty) n_fid e (xs++ys) [] e []
+                                         (n_fid,args) <- descend n_fid fes
+                                         return (n_fid,arg:args)
 
-untokn :: [Tokn] -> [String]
-untokn ts = case ts of
-  KP d _  : [] -> d
-  KP d vs : ws -> let ss@(s:_) = untokn ws in sel d vs s ++ ss
-  KS s    : ws -> s : untokn ws
-  []           -> []
- where
-   sel d vs w = case [v | Alt v cs <- vs, any (\c -> isPrefixOf c w) cs] of
-     v:_ -> v
-     _   -> d
+    def (Just (cat,fid)) n_fid e0 ys xs s =
+      case IntMap.lookup fid (lindefs cnc) of
+        Just funs           -> do funid <- funs
+                                  let args = [((wildCId, n_fid),wildCId,[e0],([],ss s))]
+                                  return (n_fid+2,((cat,n_fid+1),wildCId,[e0],mkLinTable cnc (const True) xs funid args))
+        Nothing
+          | isPredefFId fid -> return (n_fid+2,((cat,n_fid+1),wildCId,[e0],(xs,listArray (0,0) [[LeafKS [s]]])))
+          | otherwise       -> do PCoerce fid <- maybe [] Set.toList (IntMap.lookup fid (pproductions cnc))
+                                  def (Just (cat,fid)) n_fid e0 ys xs s
+    def Nothing          n_fid e0 ys xs s = []
 
--- create a table from labels+params to variants
-tabularLinearizes :: PGF -> CId -> Expr -> [[(String,String)]]
-tabularLinearizes pgf lang e = map (zip lbls . map (unwords . untokn) . elems) (linTree pgf lang (\_ _ lint -> lint) e)
-  where
-    lbls = case unApp e of
-             Just (f,_) -> let cat = valCat (lookType pgf f)
-                           in case Map.lookup cat (cnccats (lookConcr pgf lang)) of
-                                Just (CncCat _ _ lbls) -> elems lbls
-                                Nothing                -> error "No labels"
-             Nothing    -> error "Not function application"
-
-
--- show bracketed markup with references to tree structure
-markLinearizes :: PGF -> CId -> Expr -> [String]
-markLinearizes pgf lang = map (unwords . untokn . (! 0)) . linTree pgf lang mark
-  where
-    mark mb_f path lint = amap (bracket mb_f path) lint
-
-    bracket Nothing  path ts = [KS ("("++show (reverse path))] ++ ts ++ [KS ")"]
-    bracket (Just f) path ts = [KS ("(("++showCId f++","++show (reverse path)++")")] ++ ts ++ [KS ")"]
+amapWithIndex :: (IArray a e1, IArray a e2, Ix i) => (i -> e1 -> e2) -> a i e1 -> a i e2
+amapWithIndex f arr = listArray (bounds arr) (map (uncurry f) (assocs arr))

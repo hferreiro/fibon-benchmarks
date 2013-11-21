@@ -2,7 +2,7 @@
 -------------------------------------------------
 -- |
 -- Module      : PGF
--- Maintainer  : Aarne Ranta
+-- Maintainer  : Krasimir Angelov
 -- Stability   : stable
 -- Portability : portable
 --
@@ -31,10 +31,11 @@ module PGF(
            Type, Hypo,
            showType, readType,
            mkType, mkHypo, mkDepHypo, mkImplHypo,
+           unType,
            categories, startCat,
 
            -- * Functions
-           functions, functionType,
+           functions, functionsByCat, functionType, missingLins,
 
            -- * Expressions & Trees
            -- ** Tree
@@ -43,20 +44,24 @@ module PGF(
            -- ** Expr
            Expr,
            showExpr, readExpr,
+           mkAbs,    unAbs,
            mkApp,    unApp,
            mkStr,    unStr,
            mkInt,    unInt,
            mkDouble, unDouble,
-           mkMeta,   isMeta,
+           mkMeta,   unMeta,
 
            -- * Operations
            -- ** Linearization
-           linearize, linearizeAllLang, linearizeAll,
+           linearize, linearizeAllLang, linearizeAll, bracketedLinearize, tabularLinearizes,
            groupResults, -- lins of trees by language, removing duplicates
            showPrintName,
+           
+           BracketedString(..), FId, LIndex, Token,
+           Forest.showBracketedString,flattenBracketedString,
 
            -- ** Parsing
-           parse, parseWithRecovery, parseAllLang, parseAll,
+           parse, parseAllLang, parseAll, parse_, parseWithRecovery,
 
            -- ** Evaluation
            PGF.compute, paraphrase,
@@ -74,24 +79,61 @@ module PGF(
            checkType, checkExpr, inferExpr,
            TcError(..), ppTcError,
 
-           -- ** Word Completion (Incremental Parsing)
-           complete,
+           -- ** Low level parsing API
            Parse.ParseState,
-           Parse.initState, Parse.nextState, Parse.getCompletions, Parse.recoveryStates, Parse.extractTrees,
+           Parse.initState, Parse.nextState, Parse.getCompletions, Parse.recoveryStates, 
+           Parse.ParseInput(..),  Parse.simpleParseInput, Parse.mkParseInput,
+           Parse.ParseOutput(..), Parse.getParseOutput,
 
            -- ** Generation
-           generateRandom, generateAll, generateAllDepth,
-           generateRandomFrom, -- from initial expression, possibly weighed
+           -- | The PGF interpreter allows automatic generation of
+           -- abstract syntax expressions of a given type. Since the
+           -- type system of GF allows dependent types, the generation
+           -- is in general undecidable. In fact, the set of all type
+           -- signatures in the grammar is equivalent to a Turing-complete language (Prolog).
+           --
+           -- There are several generation methods which mainly differ in:
+           --
+           --     * whether the expressions are sequentially or randomly generated?
+           --
+           --     * are they generated from a template? The template is an expression
+           --     containing meta variables which the generator will fill in.
+           --
+           --     * is there a limit of the depth of the expression?
+           --     The depth can be used to limit the search space, which 
+           --     in some cases is the only way to make the search decidable.
+           generateAll,         generateAllDepth,
+           generateFrom,        generateFromDepth,
+           generateRandom,      generateRandomDepth,
+           generateRandomFrom,  generateRandomFromDepth,
 
            -- ** Morphological Analysis
            Lemma, Analysis, Morpho,
            lookupMorpho, buildMorpho, fullFormLexicon,
+           morphoMissing,
+
+           -- ** Tokenizing
+           mkTokenizer,
 
            -- ** Visualizations
            graphvizAbstractTree,
            graphvizParseTree,
            graphvizDependencyTree,
+           graphvizBracketedString,
            graphvizAlignment,
+           gizaAlignment,
+           GraphvizOptions(..),
+           graphvizDefaults,
+ 
+           -- * Probabilities
+           Probabilities,
+           mkProbabilities,
+           defaultProbabilities,
+           showProbabilities,
+           readProbabilitiesFromFile,
+           
+           -- -- ** SortTop
+--         forExample,
 
            -- * Browsing
            browse
@@ -99,15 +141,19 @@ module PGF(
 
 import PGF.CId
 import PGF.Linearize
+--import PGF.SortTop
 import PGF.Generate
 import PGF.TypeCheck
 import PGF.Paraphrase
 import PGF.VisualizeTree
+import PGF.Probabilistic
 import PGF.Macros
 import PGF.Expr (Tree)
 import PGF.Morphology
 import PGF.Data
 import PGF.Binary
+import PGF.Tokenizer
+import qualified PGF.Forest as Forest
 import qualified PGF.Parse as Parse
 
 import GF.Data.Utilities (replace)
@@ -132,34 +178,15 @@ import Text.PrettyPrint
 -- > $ gf -make <grammar file name>
 readPGF  :: FilePath -> IO PGF
 
--- | Linearizes given expression as string in the language
-linearize    :: PGF -> Language -> Tree -> String
-
 -- | Tries to parse the given string in the specified language
--- and to produce abstract syntax expression. An empty
--- list is returned if the parsing is not successful. The list may also
--- contain more than one element if the grammar is ambiguous.
--- Throws an exception if the given language cannot be used
--- for parsing, see 'canParse'.
+-- and to produce abstract syntax expression.
 parse        :: PGF -> Language -> Type -> String -> [Tree]
-
-parseWithRecovery :: PGF -> Language -> Type -> [Type] -> String -> [Tree]
-
--- | The same as 'linearizeAllLang' but does not return
--- the language.
-linearizeAll     :: PGF -> Tree -> [String]
-
--- | Linearizes given expression as string in all languages
--- available in the grammar.
-linearizeAllLang :: PGF -> Tree -> [(Language,String)]
 
 -- | The same as 'parseAllLang' but does not return
 -- the language.
 parseAll     :: PGF -> Type -> String -> [[Tree]]
 
 -- | Tries to parse the given string with all available languages.
--- Languages which cannot be used for parsing (see 'canParse')
--- are ignored.
 -- The returned list contains pairs of language
 -- and list of abstract syntax expressions 
 -- (this is a list, since grammars can be ambiguous). 
@@ -167,19 +194,11 @@ parseAll     :: PGF -> Type -> String -> [[Tree]]
 -- for which at least one parsing is possible are listed.
 parseAllLang :: PGF -> Type -> String -> [(Language,[Tree])]
 
--- | The same as 'generateAllDepth' but does not limit
--- the depth in the generation, and doesn't give an initial expression.
-generateAll      :: PGF -> Type -> [Expr]
+-- | The same as 'parse' but returns more detailed information
+parse_       :: PGF -> Language -> Type -> Maybe Int -> String -> (Parse.ParseOutput,BracketedString)
 
--- | Generates an infinite list of random abstract syntax expressions.
--- This is usefull for tree bank generation which after that can be used
--- for grammar testing.
-generateRandom   :: PGF -> Type -> IO [Expr]
-
--- | Generates an exhaustive possibly infinite list of
--- abstract syntax expressions. A depth can be specified
--- to limit the search space.
-generateAllDepth :: Maybe Expr -> PGF -> Type -> Maybe Int -> [Expr]
+-- | This is an experimental function. Use it on your own risk
+parseWithRecovery :: PGF -> Language -> Type -> [Type] -> Maybe Int -> String -> (Parse.ParseOutput,BracketedString)
 
 -- | List of all languages available in the given grammar.
 languages    :: PGF -> [Language]
@@ -210,16 +229,11 @@ startCat   :: PGF -> Type
 -- | List of all functions defined in the abstract syntax
 functions :: PGF -> [CId]
 
+-- | List of all functions defined for a given category
+functionsByCat :: PGF -> CId -> [CId]
+
 -- | The type of a given function
 functionType :: PGF -> CId -> Maybe Type
-
--- | Complete the last word in the given string. If the input
--- is empty or ends in whitespace, the last word is considred
--- to be the empty string. This means that the completions
--- will be all possible next words.
-complete :: PGF -> Language -> Type -> String 
-         -> [String] -- ^ Possible completions, 
-                     -- including the given input.
 
 
 ---------------------------------------------------
@@ -228,18 +242,22 @@ complete :: PGF -> Language -> Type -> String
 
 readPGF f = decodeFile f
 
-linearize pgf lang = concat . take 1 . PGF.Linearize.linearizes pgf lang
+parse pgf lang typ s =
+  case parse_ pgf lang typ (Just 4) s of
+    (Parse.ParseOk ts,_) -> ts
+    _                    -> []
 
-parse pgf lang typ s = 
+parseAll mgr typ = map snd . parseAllLang mgr typ
+
+parseAllLang mgr typ s = 
+  [(lang,ts) | lang <- languages mgr, (Parse.ParseOk ts,_) <- [parse_ mgr lang typ (Just 4) s]]
+
+parse_ pgf lang typ dp s = 
   case Map.lookup lang (concretes pgf) of
-    Just cnc -> Parse.parse pgf lang typ (words s)
+    Just cnc -> Parse.parse pgf lang typ dp (words s)
     Nothing  -> error ("Unknown language: " ++ showCId lang)
 
-parseWithRecovery pgf lang typ open_typs s = Parse.parseWithRecovery pgf lang typ open_typs (words s)
-
-linearizeAll mgr = map snd . linearizeAllLang mgr
-linearizeAllLang mgr t = 
-  [(lang,PGF.linearize mgr lang t) | lang <- languages mgr]
+parseWithRecovery pgf lang typ open_typs dp s = Parse.parseWithRecovery pgf lang typ open_typs dp (words s)
 
 groupResults :: [[(Language,String)]] -> [(Language,[String])]
 groupResults = Map.toList . foldr more Map.empty . start . concat
@@ -247,18 +265,6 @@ groupResults = Map.toList . foldr more Map.empty . start . concat
   start ls = [(l,[s]) | (l,s) <- ls]
   more (l,s) = 
     Map.insertWith (\ [x] xs -> if elem x xs then xs else (x : xs)) l s
-
-parseAll mgr typ = map snd . parseAllLang mgr typ
-
-parseAllLang mgr typ s = 
-  [(lang,ts) | lang <- languages mgr, let ts = parse mgr lang typ s, not (null ts)]
-
-generateRandom pgf cat = do
-  gen <- newStdGen
-  return $ genRandom gen pgf cat
-
-generateAll pgf cat = generate pgf cat Nothing
-generateAllDepth mex pgf cat = generateAllFrom mex pgf cat
 
 abstractName pgf = absname pgf
 
@@ -275,30 +281,15 @@ startCat pgf = DTyp [] (lookStartCat pgf) []
 
 functions pgf = Map.keys (funs (abstract pgf))
 
+functionsByCat pgf cat =
+  case Map.lookup cat (cats (abstract pgf)) of
+    Just (_,fns,_) -> map snd fns
+    Nothing        -> []
+
 functionType pgf fun =
   case Map.lookup fun (funs (abstract pgf)) of
-    Just (ty,_,_) -> Just ty
-    Nothing       -> Nothing
-
-complete pgf from typ input = 
-         let (ws,prefix) = tokensAndPrefix input
-             state0 = Parse.initState pgf from typ
-         in case loop state0 ws of
-              Nothing -> []
-              Just state -> 
-                (if null prefix && not (null (Parse.extractTrees state typ)) then [unwords ws ++ " "] else [])
-                ++ [unwords (ws++[c]) ++ " " | c <- Map.keys (Parse.getCompletions state prefix)]
-  where
-    tokensAndPrefix :: String -> ([String],String)
-    tokensAndPrefix s | not (null s) && isSpace (last s) = (ws, "")
-                      | null ws = ([],"")
-                      | otherwise = (init ws, last ws)
-        where ws = words s
-
-    loop ps []     = Just ps
-    loop ps (t:ts) = case Parse.nextState ps t of
-                       Left  es -> Nothing
-                       Right ps -> loop ps ts
+    Just (ty,_,_,_,_) -> Just ty
+    Nothing           -> Nothing
 
 -- | Converts an expression to normal form
 compute :: PGF -> Expr -> Expr
@@ -308,20 +299,20 @@ browse :: PGF -> CId -> Maybe (String,[CId],[CId])
 browse pgf id = fmap (\def -> (def,producers,consumers)) definition
   where
     definition = case Map.lookup id (funs (abstract pgf)) of
-                   Just (ty,_,Just eqs) -> Just $ render (text "fun" <+> ppCId id <+> colon <+> ppType 0 [] ty $$
-                                                          if null eqs
-                                                            then empty
-                                                            else text "def" <+> vcat [let scope = foldl pattScope [] patts
-                                                                                          ds    = map (ppPatt 9 scope) patts
-                                                                                      in ppCId id <+> hsep ds <+> char '=' <+> ppExpr 0 scope res | Equ patts res <- eqs])
-                   Just (ty,_,Nothing ) -> Just $ render (text "data" <+> ppCId id <+> colon <+> ppType 0 [] ty)
+                   Just (ty,_,Just eqs,_,_) -> Just $ render (text "fun" <+> ppCId id <+> colon <+> ppType 0 [] ty $$
+                                                              if null eqs
+                                                                then empty
+                                                                else text "def" <+> vcat [let scope = foldl pattScope [] patts
+                                                                                              ds    = map (ppPatt 9 scope) patts
+                                                                                          in ppCId id <+> hsep ds <+> char '=' <+> ppExpr 0 scope res | Equ patts res <- eqs])
+                   Just (ty,_,Nothing, _,_) -> Just $ render (text "data" <+> ppCId id <+> colon <+> ppType 0 [] ty)
                    Nothing   -> case Map.lookup id (cats (abstract pgf)) of
-                                  Just (hyps,_) -> Just $ render (text "cat" <+> ppCId id <+> hsep (snd (mapAccumL (ppHypo 4) [] hyps)))
-                                  Nothing       -> Nothing
+                                  Just (hyps,_,_) -> Just $ render (text "cat" <+> ppCId id <+> hsep (snd (mapAccumL (ppHypo 4) [] hyps)))
+                                  Nothing         -> Nothing
 
     (producers,consumers) = Map.foldWithKey accum ([],[]) (funs (abstract pgf))
       where
-        accum f (ty,_,_) (plist,clist) = 
+        accum f (ty,_,_,_,_) (plist,clist) = 
           let !plist' = if id `elem` ps then f : plist else plist
               !clist' = if id `elem` cs then f : clist else clist
           in (plist',clist')

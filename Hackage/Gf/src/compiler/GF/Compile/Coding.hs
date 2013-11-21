@@ -3,7 +3,6 @@ module GF.Compile.Coding where
 import GF.Grammar.Grammar
 import GF.Grammar.Macros
 import GF.Text.Coding
-import GF.Infra.Modules
 import GF.Infra.Option
 import GF.Data.Operations
 
@@ -18,17 +17,22 @@ decodeStringsInModule :: TextEncoding -> SourceModule -> SourceModule
 decodeStringsInModule enc mo = codeSourceModule (decodeUnicode enc . BS.pack) mo
 
 codeSourceModule :: (String -> String) -> SourceModule -> SourceModule
-codeSourceModule co (id,mo) = (id,replaceJudgements mo (mapTree codj (jments mo)))
+codeSourceModule co (id,mo) = (id,mo{jments = mapTree codj (jments mo)})
  where
     codj (c,info) = case info of
-      ResOper     pty pt  -> ResOper (fmap (codeTerm co) pty) (fmap (codeTerm co) pt) 
-      ResOverload es tyts -> ResOverload es [(codeTerm co ty,codeTerm co t) | (ty,t) <- tyts]
-      CncCat pty pt mpr   -> CncCat pty (fmap (codeTerm co) pt) (fmap (codeTerm co) mpr)
-      CncFun mty pt mpr   -> CncFun mty (fmap (codeTerm co) pt) (fmap (codeTerm co) mpr)
+      ResOper     pty pt   -> ResOper (codeLTerms co pty) (codeLTerms co pt) 
+      ResOverload es tyts  -> ResOverload es [(codeLTerm co ty,codeLTerm co t) | (ty,t) <- tyts]
+      CncCat mty mt mpr mpmcfg -> CncCat mty (codeLTerms co mt) (codeLTerms co mpr) mpmcfg
+      CncFun mty mt mpr mpmcfg -> CncFun mty (codeLTerms co mt) (codeLTerms co mpr) mpmcfg
       _ -> info
 
-codeTerm :: (String -> String) -> L Term -> L Term
-codeTerm co (L loc t) = L loc (codt t)
+codeLTerms co = fmap (codeLTerm co)
+
+codeLTerm :: (String -> String) -> L Term -> L Term
+codeLTerm = fmap . codeTerm
+
+codeTerm :: (String -> String) -> Term -> Term
+codeTerm co = codt
   where
     codt t = case t of
       K s -> K (co s)

@@ -1,5 +1,4 @@
-{-# LANGUAGE CPP #-}
-{-# OPTIONS_GHC -fglasgow-exts #-}
+{-# LANGUAGE CPP, MagicHash #-}
 -- for unboxed shifts
 
 -----------------------------------------------------------------------------
@@ -367,7 +366,6 @@ splitAtST i ps          = runST (
         return (xs, ys))
 
   where
-        first :: STRef s L.ByteString -> Int64 -> L.ByteString -> ST s L.ByteString
         first r 0 xs@(L.Chunk _ _) = writeSTRef r xs    >> return L.Empty
         first r _ L.Empty          = writeSTRef r L.Empty >> return L.Empty
 

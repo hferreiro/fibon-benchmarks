@@ -19,6 +19,7 @@ module GF.Grammar.Predef
           , cInt
           , cFloat
           , cString
+          , cVar
           , cInts
           , cPBool
           , cErrorType
@@ -31,6 +32,8 @@ module GF.Grammar.Predef
           , cLength, cDrop, cTake, cTk, cDp, cEqStr, cOccur
           , cOccurs, cEqInt, cLessInt, cPlus, cShow, cRead
           , cToStr, cMapStr, cError
+          , cToUpper, cToLower, cIsUpper
+          , cEqVal
 
           -- hacks
           , cMeta, cAs, cChar, cChars, cSeq, cAlt, cRep
@@ -73,6 +76,9 @@ cFloat = identC (BS.pack "Float")
 cString :: Ident
 cString = identC (BS.pack "String")
 
+cVar :: Ident
+cVar = identC (BS.pack "__gfVar")
+
 cInts :: Ident
 cInts = identC (BS.pack "Ints")
 
@@ -112,8 +118,20 @@ cTk = identC (BS.pack "tk")
 cDp :: Ident
 cDp = identC (BS.pack "dp")
 
+cToUpper :: Ident
+cToUpper = identC (BS.pack "toUpper")
+
+cToLower :: Ident
+cToLower = identC (BS.pack "toLower")
+
+cIsUpper :: Ident
+cIsUpper = identC (BS.pack "isUpper")
+
 cEqStr :: Ident
 cEqStr = identC (BS.pack "eqStr")
+
+cEqVal :: Ident
+cEqVal = identC (BS.pack "eqVal")
 
 cOccur :: Ident
 cOccur = identC (BS.pack "occur")

@@ -1,117 +1,174 @@
-module PGF.Generate where
+module PGF.Generate 
+         ( generateAll,         generateAllDepth
+         , generateFrom,        generateFromDepth
+         , generateRandom,      generateRandomDepth
+         , generateRandomFrom,  generateRandomFromDepth
+         , prove
+         ) where
 
 import PGF.CId
 import PGF.Data
+import PGF.Expr
 import PGF.Macros
 import PGF.TypeCheck
 import PGF.Probabilistic
 
-import qualified Data.Map as M
+import Data.Maybe (fromMaybe)
+import qualified Data.Map as Map
+import qualified Data.IntMap as IntMap
+import Control.Monad
+import Control.Monad.Identity
 import System.Random
 
--- generate all fillings of metavariables in an expr
-generateAllFrom :: Maybe Expr -> PGF -> Type -> Maybe Int -> [Expr]
-generateAllFrom mex pgf ty mi = 
-  maybe (gen ty) (generateForMetas False pgf gen) mex where
-    gen ty = generate pgf ty mi
 
--- generate random fillings of metavariables in an expr
-generateRandomFrom :: Maybe Expr -> 
-                      Maybe Probabilities -> StdGen -> PGF -> Type -> [Expr]
-generateRandomFrom mex ps rg pgf ty = 
-  maybe (gen ty) (generateForMetas True pgf gen) mex where
-    gen ty = genRandomProb ps rg pgf ty
+------------------------------------------------------------------------------
+-- The API
 
+-- | Generates an exhaustive possibly infinite list of
+-- abstract syntax expressions.
+generateAll :: PGF -> Type -> [Expr]
+generateAll pgf ty = generateAllDepth pgf ty Nothing
 
--- generic algorithm for filling holes in a generator
--- for random, should be breadth-first, since otherwise first metas always get the same
--- value when a list is generated
-generateForMetas :: Bool -> PGF -> (Type -> [Expr]) -> Expr -> [Expr]
-generateForMetas breadth pgf gen exp = case exp of
-  EApp f (EMeta _) -> [EApp g a | g <- gener f, a <- genArg g]
-  EApp f x | breadth -> [EApp g a | (g,a) <- zip (gener f) (gener x)]
-  EApp f x  -> [EApp g a | (g,a) <- zip (gener f) (gener x)]
-  _ -> if breadth then repeat exp else [exp]
- where
-  gener    = generateForMetas breadth pgf gen
-  genArg f = case inferExpr pgf f of
-    Right (_,DTyp ((_,_,ty):_) _ _) -> gen ty
-    _ -> []
+-- | A variant of 'generateAll' which also takes as argument
+-- the upper limit of the depth of the generated expression.
+generateAllDepth :: PGF -> Type -> Maybe Int -> [Expr]
+generateAllDepth pgf ty dp = generate () pgf ty dp
 
--- generate an infinite list of trees exhaustively
-generate :: PGF -> Type -> Maybe Int -> [Expr]
-generate pgf ty@(DTyp _ cat _) dp = filter (\e -> case checkExpr pgf e ty of 
-                                                    Left  _ -> False
-                                                    Right _ -> True             )
-                                           (concatMap (\i -> gener i cat) depths)
- where
-  gener 0 c = [EFun f | (f, ([],_)) <- fns c]
-  gener i c = [
-    tr | 
-      (f, (cs,_)) <- fns c,
-      let alts = map (gener (i-1)) cs,
-      ts <- combinations alts,
-      let tr = foldl EApp (EFun f) ts,
-      depth tr >= i
-    ]
-  fns c = [(f,catSkeleton ty) | (f,ty) <- functionsToCat pgf c]
-  depths = maybe [0 ..] (\d -> [0..d]) dp
+-- | Generates a list of abstract syntax expressions
+-- in a way similar to 'generateAll' but instead of
+-- generating all instances of a given type, this
+-- function uses a template. 
+generateFrom :: PGF -> Expr -> [Expr]
+generateFrom pgf ex = generateFromDepth pgf ex Nothing
 
--- generate an infinite list of trees randomly
-genRandom :: StdGen -> PGF -> Type -> [Expr]
-genRandom = genRandomProb Nothing
+-- | A variant of 'generateFrom' which also takes as argument
+-- the upper limit of the depth of the generated subexpressions.
+generateFromDepth :: PGF -> Expr -> Maybe Int -> [Expr]
+generateFromDepth pgf e dp = 
+  [e | (_,_,e) <- snd $ runTcM (abstract pgf)
+                               (generateForMetas (prove dp) e)
+                               emptyMetaStore ()]
 
-genRandomProb :: Maybe Probabilities -> StdGen -> PGF -> Type -> [Expr]
-genRandomProb mprobs gen pgf ty@(DTyp _ cat _) = 
-   filter (\e -> case checkExpr pgf e ty of 
-                   Left  _ -> False
-                   Right _ -> True             )
-          (genTrees (randomRs (0.0, 1.0 :: Double) gen) cat)
- where
-  timeout = 47 -- give up
+-- | Generates an infinite list of random abstract syntax expressions.
+-- This is usefull for tree bank generation which after that can be used
+-- for grammar testing.
+generateRandom :: RandomGen g => g -> PGF -> Type -> [Expr]
+generateRandom g pgf ty = generateRandomDepth g pgf ty Nothing
 
-  genTrees ds0 cat = 
-    let (ds,ds2) = splitAt (timeout+1) ds0  -- for time out, else ds
-        (t,k) = genTree ds cat      
-    in (if k>timeout then id else (t:))
-                (genTrees ds2 cat)          -- else (drop k ds)
+-- | A variant of 'generateRandom' which also takes as argument
+-- the upper limit of the depth of the generated expression.
+generateRandomDepth :: RandomGen g => g -> PGF -> Type -> Maybe Int -> [Expr]
+generateRandomDepth g pgf ty dp = restart g (\g -> generate (Identity g) pgf ty dp)
 
-  genTree rs = gett rs where
-    gett ds cid | cid == cidString = (ELit (LStr "foo"), 1)
-    gett ds cid | cid == cidInt    = (ELit (LInt 12345), 1)
-    gett ds cid | cid == cidFloat  = (ELit (LFlt 12345), 1)
-    gett [] _   = (ELit (LStr "TIMEOUT"), 1) ----
-    gett ds cat = case fns cat of
-      [] -> (EMeta 0,1)
-      fs -> let 
-          d:ds2    = ds
-          (f,args) = getf d fs
-          (ts,k)   = getts ds2 args
-        in (foldl EApp f ts, k+1)
-    getf d fs = case mprobs of
-      Just _ -> hitRegion d [(p,(f,args)) | (p,(f,args)) <- fs]
-      _      -> let 
-                  lg = length fs 
-                  (f,v) = snd (fs !! (floor (d * fromIntegral lg)))
-                in (EFun f,v)
-    getts ds cats = case cats of
-      c:cs -> let 
-          (t, k)  = gett ds c
-          (ts,ks) = getts (drop k ds) cs 
-        in (t:ts, k + ks)
-      _ -> ([],0)
+-- | Random generation based on template
+generateRandomFrom :: RandomGen g => g -> PGF -> Expr -> [Expr]
+generateRandomFrom g pgf e = generateRandomFromDepth g pgf e Nothing
 
-    fns :: CId -> [(Double,(CId,[CId]))]
-    fns cat = case mprobs of 
-      Just probs -> maybe [] id $ M.lookup cat (catProbs probs)
-      _ -> [(deflt,(f,(fst (catSkeleton ty)))) | 
-              let fs = functionsToCat pgf cat, 
-              (f,ty) <- fs,
-              let deflt = 1.0 / fromIntegral (length fs)]
-
-hitRegion :: Double -> [(Double,(CId,[a]))] -> (Expr,[a])
-hitRegion d vs = case vs of
-  (p1,(f,v1)):vs2 -> if d < p1 then (EFun f, v1) else hitRegion (d-p1) vs2
-  _ -> (EMeta 9,[])
+-- | Random generation based on template with a limitation in the depth.
+generateRandomFromDepth :: RandomGen g => g -> PGF -> Expr -> Maybe Int -> [Expr]
+generateRandomFromDepth g pgf e dp = 
+  restart g (\g -> [e | (_,ms,e) <- snd $ runTcM (abstract pgf)
+                                                 (generateForMetas (prove dp) e)
+                                                 emptyMetaStore (Identity g)])
 
 
+------------------------------------------------------------------------------
+-- The main generation algorithm
+
+generate :: Selector sel => sel -> PGF -> Type -> Maybe Int -> [Expr]
+generate sel pgf ty dp =
+  [e | (_,ms,e) <- snd $ runTcM (abstract pgf)
+                                (prove dp emptyScope (TTyp [] ty) >>= checkResolvedMetaStore emptyScope)
+                                emptyMetaStore sel]
+
+prove :: Selector sel => Maybe Int -> Scope -> TType -> TcM sel Expr
+prove dp scope (TTyp env1 (DTyp hypos1 cat es1)) = do
+  vs1 <- mapM (PGF.TypeCheck.eval env1) es1
+  let scope' = exScope scope env1 hypos1
+  (fe,TTyp env2 (DTyp hypos2 _ es2)) <- select cat scope' dp
+  case dp of
+    Just 0 | not (null hypos2) -> mzero
+    _                          -> return ()
+  (env2,args) <- mkEnv scope' env2 hypos2
+  vs2 <- mapM (PGF.TypeCheck.eval env2) es2
+  sequence_ [eqValue mzero suspend (scopeSize scope') v1 v2 | (v1,v2) <- zip vs1 vs2]
+  es <- mapM (descend scope') args
+  return (abs hypos1 (foldl EApp fe es))
+  where
+    suspend i c = do
+      mv <- getMeta i
+      case mv of
+        MBound e -> c e
+        MUnbound x scope tty cs -> setMeta i (MUnbound x scope tty (c:cs))
+
+    abs []                e = e
+    abs ((bt,x,ty):hypos) e = EAbs bt x (abs hypos e)
+
+    exScope scope env []                = scope
+    exScope scope env ((bt,x,ty):hypos) = 
+       let env' | x /= wildCId = VGen (scopeSize scope) [] : env
+                | otherwise    = env
+       in exScope (addScopedVar x (TTyp env ty) scope) env' hypos
+
+    mkEnv scope env []                = return (env,[])
+    mkEnv scope env ((bt,x,ty):hypos) = do
+      (env,arg) <- if x /= wildCId
+                    then do i <- newMeta scope (TTyp env ty)
+                            return (VMeta i (scopeEnv scope) [] : env,Right (EMeta i))
+                    else return (env,Left (TTyp env ty))
+      (env,args) <- mkEnv scope env hypos
+      return (env,(bt,arg):args)
+
+    descend scope (bt,arg) = do
+      let dp' = fmap (flip (-) 1) dp
+      e <- case arg of
+             Right e  -> return e
+             Left tty -> prove dp' scope tty
+      e <- case bt of
+             Implicit -> return (EImplArg e)
+             Explicit -> return e
+      return e
+
+
+-- Helper function for random generation. After every
+-- success we must restart the search to find sufficiently different solution.
+restart :: RandomGen g => g -> (g -> [a]) -> [a]
+restart g f =
+  let (g1,g2) = split g
+  in case f g1 of
+       []     -> []
+       (x:xs) -> x : restart g2 f
+
+
+------------------------------------------------------------------------------
+-- Selectors
+
+instance Selector () where
+  splitSelector s = (s,s)
+  select cat scope dp = do
+    gens <- typeGenerators scope cat
+    TcM (\abstr k h -> iter k gens)
+    where
+      iter k []              ms s = id
+      iter k ((_,e,tty):fns) ms s = k (e,tty) ms s . iter k fns ms s
+
+
+instance RandomGen g => Selector (Identity g) where
+  splitSelector (Identity g) = let (g1,g2) = split g
+                               in (Identity g1, Identity g2)
+
+  select cat scope dp = do
+    gens <- typeGenerators scope cat
+    TcM (\abstr k h -> iter k 1.0 gens)
+    where
+      iter k p []   ms (Identity g) = id
+      iter k p gens ms (Identity g) = let (d,g')    = randomR (0.0,p) g
+                                          (g1,g2)   = split g'
+                                          (p',e_ty,gens') = hit d gens
+                                      in k e_ty ms (Identity g1) . iter k (p-p') gens' ms (Identity g2)
+
+      hit :: Double -> [(Double,Expr,TType)] -> (Double,(Expr,TType),[(Double,Expr,TType)])
+      hit d (gen@(p,e,ty):gens)
+        | d < p || null gens = (p,(e,ty),gens)
+        | otherwise = let (p',e_ty',gens') = hit (d-p) gens
+                      in (p',e_ty',gen:gens')

@@ -1,13 +1,14 @@
 module Fre where
 
-import PGF
+import PGF hiding (Tree)
+import qualified PGF
 ----------------------------------------------------
 -- automatic translation from GF to Haskell
 ----------------------------------------------------
 
 class Gf a where
-  gf :: a -> Tree
-  fg :: Tree -> a
+  gf :: a -> PGF.Tree
+  fg :: PGF.Tree -> a
 
 newtype GString = GString String  deriving Show
 
@@ -477,6 +478,132 @@ data GWord =
    GWVerb GV 
  | GWVerb2 GV2 
   deriving Show
+
+data GA
+
+data GA2
+
+data GAP
+
+data GAdA
+
+data GAdN
+
+data GAdV
+
+data GAdv
+
+data GAnt
+
+data GCAdv
+
+data GCN
+
+data GCard
+
+data GCl
+
+data GClSlash
+
+data GComp
+
+data GConj
+
+data GDet
+
+data GDigits
+
+data GIAdv
+
+data GIComp
+
+data GIDet
+
+data GIP
+
+data GIQuant
+
+data GImp
+
+data GN
+
+data GN2
+
+data GN3
+
+data GNP
+
+data GNum
+
+data GNumeral
+
+data GOrd
+
+data GPConj
+
+data GPN
+
+data GPhr
+
+data GPol
+
+data GPredet
+
+data GPrep
+
+data GPron
+
+data GQCl
+
+data GQS
+
+data GQuant
+
+data GRCl
+
+data GRP
+
+data GRS
+
+data GS
+
+data GSC
+
+data GSSlash
+
+data GSubj
+
+data GTemp
+
+data GTense
+
+data GText
+
+data GUtt
+
+data GV2A
+
+data GV2Q
+
+data GV2S
+
+data GV2V
+
+data GV3
+
+data GVA
+
+data GVP
+
+data GVPSlash
+
+data GVQ
+
+data GVS
+
+data GVV
+
+data GVoc
 
 
 instance Gf GDisplay where
@@ -1376,5 +1503,509 @@ instance Gf GWord where
 
 
       _ -> error ("no Word " ++ show t)
+
+instance Show GA
+
+instance Gf GA where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GA2
+
+instance Gf GA2 where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GAP
+
+instance Gf GAP where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GAdA
+
+instance Gf GAdA where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GAdN
+
+instance Gf GAdN where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GAdV
+
+instance Gf GAdV where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GAdv
+
+instance Gf GAdv where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GAnt
+
+instance Gf GAnt where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GCAdv
+
+instance Gf GCAdv where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GCN
+
+instance Gf GCN where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GCard
+
+instance Gf GCard where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GCl
+
+instance Gf GCl where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GClSlash
+
+instance Gf GClSlash where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GComp
+
+instance Gf GComp where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GConj
+
+instance Gf GConj where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GDet
+
+instance Gf GDet where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GDigits
+
+instance Gf GDigits where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GIAdv
+
+instance Gf GIAdv where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GIComp
+
+instance Gf GIComp where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GIDet
+
+instance Gf GIDet where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GIP
+
+instance Gf GIP where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GIQuant
+
+instance Gf GIQuant where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GImp
+
+instance Gf GImp where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GN
+
+instance Gf GN where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GN2
+
+instance Gf GN2 where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GN3
+
+instance Gf GN3 where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GNP
+
+instance Gf GNP where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GNum
+
+instance Gf GNum where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GNumeral
+
+instance Gf GNumeral where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GOrd
+
+instance Gf GOrd where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GPConj
+
+instance Gf GPConj where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GPN
+
+instance Gf GPN where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GPhr
+
+instance Gf GPhr where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GPol
+
+instance Gf GPol where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GPredet
+
+instance Gf GPredet where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GPrep
+
+instance Gf GPrep where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GPron
+
+instance Gf GPron where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GQCl
+
+instance Gf GQCl where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GQS
+
+instance Gf GQS where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GQuant
+
+instance Gf GQuant where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GRCl
+
+instance Gf GRCl where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GRP
+
+instance Gf GRP where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GRS
+
+instance Gf GRS where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GS
+
+instance Gf GS where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GSC
+
+instance Gf GSC where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GSSlash
+
+instance Gf GSSlash where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GSubj
+
+instance Gf GSubj where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GTemp
+
+instance Gf GTemp where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GTense
+
+instance Gf GTense where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GText
+
+instance Gf GText where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GUtt
+
+instance Gf GUtt where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GV2A
+
+instance Gf GV2A where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GV2Q
+
+instance Gf GV2Q where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GV2S
+
+instance Gf GV2S where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GV2V
+
+instance Gf GV2V where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GV3
+
+instance Gf GV3 where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GVA
+
+instance Gf GVA where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GVP
+
+instance Gf GVP where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GVPSlash
+
+instance Gf GVPSlash where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GVQ
+
+instance Gf GVQ where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GVS
+
+instance Gf GVS where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GVV
+
+instance Gf GVV where
+  gf _ = undefined
+  fg _ = undefined
+
+
+
+instance Show GVoc
+
+instance Gf GVoc where
+  gf _ = undefined
+  fg _ = undefined
+
+
 
 

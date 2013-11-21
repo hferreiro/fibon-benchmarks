@@ -1,7 +1,8 @@
 module PGF.Morphology(Lemma,Analysis,Morpho,
-                      buildMorpho,
+                      buildMorpho,isInMorpho,
                       lookupMorpho,fullFormLexicon,
-                      morphoMissing,missingWordMsg) where
+                      morphoMissing,morphoKnown,morphoClassify,
+                      missingWordMsg) where
 
 import PGF.CId
 import PGF.Data
@@ -29,7 +30,7 @@ buildMorpho pgf lang = Morpho $
 collectWords pinfo = Map.fromListWith (++)
   [(t, [(fun,lbls ! l)]) | (CncCat s e lbls) <- Map.elems (cnccats pinfo)
                          , fid <- [s..e]
-                         , PApply funid _ <- maybe [] Set.toList (IntMap.lookup fid (pproductions pinfo))
+                         , PApply funid _ <- maybe [] Set.toList (IntMap.lookup fid (productions pinfo))
                          , let CncFun fun lins = cncfuns pinfo ! funid
                          , (l,seqid) <- assocs lins
                          , sym <- elems (sequences pinfo ! seqid)
@@ -42,11 +43,20 @@ collectWords pinfo = Map.fromListWith (++)
 lookupMorpho :: Morpho -> String -> [(Lemma,Analysis)]
 lookupMorpho (Morpho mo) s = maybe [] id $ Map.lookup s mo
 
+isInMorpho :: Morpho -> String -> Bool
+isInMorpho (Morpho mo) s = maybe False (const True) $ Map.lookup s mo
+
 fullFormLexicon :: Morpho -> [(String,[(Lemma,Analysis)])]
 fullFormLexicon (Morpho mo) = Map.toList mo
 
-morphoMissing :: Morpho -> [String] -> [String]
-morphoMissing mo ws = [w | w <- ws, null (lookupMorpho mo w), notLiteral w] where
+morphoMissing  :: Morpho -> [String] -> [String]
+morphoMissing = morphoClassify False
+
+morphoKnown    :: Morpho -> [String] -> [String]
+morphoKnown = morphoClassify True
+
+morphoClassify :: Bool -> Morpho -> [String] -> [String]
+morphoClassify k mo ws = [w | w <- ws, k /= null (lookupMorpho mo w), notLiteral w] where
   notLiteral w = not (all isDigit w) ---- should be defined somewhere
 
 missingWordMsg :: Morpho -> [String] -> String

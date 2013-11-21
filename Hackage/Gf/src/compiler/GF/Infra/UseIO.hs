@@ -15,22 +15,26 @@
 
 module GF.Infra.UseIO where
 
+import Prelude hiding (catch)
+
 import GF.Data.Operations
 import GF.Infra.Option
+import GF.System.Catch
 import Paths_gf(getDataDir)
 
 import System.Directory
 import System.FilePath
 import System.IO
-import System.IO.Error
+import System.IO.Error(isUserError,ioeGetErrorString)
 import System.Environment
 import System.Exit
 import System.CPUTime
+import System.Cmd
 import Text.Printf
 import Control.Monad
+import Control.Monad.Trans(MonadIO(..))
 import Control.Exception(evaluate)
 import qualified Data.ByteString.Char8 as BS
-import Data.List(nub)
 
 putShow' :: Show a => (c -> a) -> c -> IO ()
 putShow' f = putStrLn . show . length . show . f
@@ -67,7 +71,8 @@ getLibraryDirectory opts =
 
 getGrammarPath :: FilePath -> IO [FilePath]
 getGrammarPath lib_dir = do
-  catch (fmap splitSearchPath $ getEnv gfGrammarPathVar) (\_ -> return [lib_dir </> "prelude"])     -- e.g. GF_GRAMMAR_PATH
+  catch (fmap splitSearchPath $ getEnv gfGrammarPathVar) 
+        (\_ -> return [lib_dir </> "alltenses",lib_dir </> "prelude"])     -- e.g. GF_GRAMMAR_PATH
 
 -- | extends the search path with the
 -- 'gfLibraryPath' and 'gfGrammarPathVar'
@@ -122,10 +127,7 @@ putStrLnFlush s = putStrLn s >> hFlush stdout
 
 -- * IO monad with error; adapted from state monad
 
-newtype IOE a = IOE (IO (Err a))
-
-appIOE :: IOE a -> IO (Err a)
-appIOE (IOE iea) = iea
+newtype IOE a = IOE { appIOE :: IO (Err a) }
 
 ioe :: IO (Err a) -> IOE a
 ioe = IOE
@@ -136,11 +138,19 @@ ioeIO io = ioe (io >>= return . return)
 ioeErr :: Err a -> IOE a
 ioeErr = ioe . return 
 
+ioeErrIn :: String -> IOE a -> IOE a
+ioeErrIn msg (IOE ioe) = IOE (fmap (errIn msg) ioe)
+
+instance Functor IOE where fmap = liftM
+
 instance  Monad IOE where
   return a    = ioe (return (return a))
   IOE c >>= f = IOE $ do 
                   x <- c          -- Err a
                   appIOE $ err ioeBad f x         -- f :: a -> IOE a
+  fail = ioeBad
+
+instance MonadIO IOE where liftIO = ioeIO
 
 ioeBad :: String -> IOE a
 ioeBad = ioe . return . Bad
@@ -156,9 +166,6 @@ foldIOE f s xs = case xs of
     case ev of 
       Ok v  -> foldIOE f v xx
       Bad m -> return $ (s, Just m)
-
-dieIOE :: IOE a -> IO a
-dieIOE x = appIOE x >>= err die return
 
 die :: String -> IO a
 die s = do hPutStrLn stderr s
@@ -184,3 +191,19 @@ putPointE v opts msg act = do
       else when (verbAtLeast opts v) $ putStrLnE ""
 
   return a
+
+-- * File IO
+
+writeUTF8File :: FilePath -> String -> IO ()
+writeUTF8File fpath content =
+  withFile fpath WriteMode $ \ h -> do hSetEncoding h utf8
+                                       hPutStr h content
+
+readBinaryFile path = hGetContents =<< openBinaryFile path ReadMode
+writeBinaryFile path s = withBinaryFile path WriteMode (flip hPutStr s)
+
+-- | Because GHC adds the confusing text "user error" for failures caused by
+-- calls to fail.
+ioErrorText e = if isUserError e
+                then ioeGetErrorString e
+                else show e

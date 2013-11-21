@@ -48,6 +48,9 @@ module Data.Binary (
     , encodeFile                -- :: Binary a => FilePath -> a -> IO ()
     , decodeFile                -- :: Binary a => FilePath -> IO a
 
+    , encodeFile_               -- :: FilePath -> Put   -> IO ()
+    , decodeFile_               -- :: FilePath -> Get a -> IO a
+
 -- Lazy put and get
 --  , lazyPut
 --  , lazyGet
@@ -62,7 +65,7 @@ import Data.Word
 
 import Data.Binary.Put
 import Data.Binary.Get
-
+import Data.Binary.IEEE754 ( putFloat64be, getFloat64be)
 import Control.Monad
 import Control.Exception
 import Foreign
@@ -254,6 +257,9 @@ decode = runGet get
 encodeFile :: Binary a => FilePath -> a -> IO ()
 encodeFile f v = L.writeFile f (encode v)
 
+encodeFile_ :: FilePath -> Put -> IO ()
+encodeFile_ f m = L.writeFile f (runPut m)
+
 -- | Lazily reconstruct a value previously written to a file.
 --
 -- This is just a convenience function, it's defined simply as:
@@ -268,6 +274,11 @@ decodeFile :: Binary a => FilePath -> IO a
 decodeFile f = bracket (openBinaryFile f ReadMode) hClose $ \h -> do
     s <- L.hGetContents h
     evaluate $ runGet get s
+
+decodeFile_ :: FilePath -> Get a -> IO a
+decodeFile_ f m = bracket (openBinaryFile f ReadMode) hClose $ \h -> do
+    s <- L.hGetContents h
+    evaluate $ runGet m s
 
 -- needs bytestring 0.9.1.x to work 
 
@@ -337,7 +348,7 @@ instance Binary Int32 where
     put i   = put (fromIntegral i :: Word32)
     get     = liftM fromIntegral (get :: Get Word32)
 
--- Int64s are written as a 4 bytes in big endian format
+-- Int64s are written as a 8 bytes in big endian format
 instance Binary Int64 where
     put i   = put (fromIntegral i :: Word64)
     get     = liftM fromIntegral (get :: Get Word64)
@@ -357,13 +368,16 @@ instance Binary Word where
                                          put (b .|. 0x80)
                                          put (c .|. 0x80)
                                          put  d
-#if WORD_SIZE_IN_BITS < 64
+-- -- #if WORD_SIZE_IN_BITS < 64
           | otherwise               = do put (a .|. 0x80)
                                          put (b .|. 0x80)
                                          put (c .|. 0x80)
                                          put (d .|. 0x80)
                                          put  e
-#else
+{-
+-- Restricted to 32 bits even on 64-bit systems, so that negative
+-- Ints are written as 5 bytes instead of 10 bytes (TH 2013-02-13)
+--#else
           | i <=        0x7ffffffff = do put (a .|. 0x80)
                                          put (b .|. 0x80)
                                          put (c .|. 0x80)
@@ -417,19 +431,21 @@ instance Binary Word where
                                          put (h .|. 0x80)
                                          put (j .|. 0x80)
                                          put  k
-#endif
+-- #endif
+-}
           where
             a = fromIntegral (       i    .&. 0x7f) :: Word8
             b = fromIntegral (shiftR i  7 .&. 0x7f) :: Word8
             c = fromIntegral (shiftR i 14 .&. 0x7f) :: Word8
             d = fromIntegral (shiftR i 21 .&. 0x7f) :: Word8
             e = fromIntegral (shiftR i 28 .&. 0x7f) :: Word8
+{-
             f = fromIntegral (shiftR i 35 .&. 0x7f) :: Word8
             g = fromIntegral (shiftR i 42 .&. 0x7f) :: Word8
             h = fromIntegral (shiftR i 49 .&. 0x7f) :: Word8
             j = fromIntegral (shiftR i 56 .&. 0x7f) :: Word8
             k = fromIntegral (shiftR i 63 .&. 0x7f) :: Word8
-
+-}
     get = do i <- getWord8
              (if i <= 0x7f
                 then return (fromIntegral i)
@@ -439,7 +455,10 @@ instance Binary Word where
 -- Int has the same representation as Word
 instance Binary Int where
     put i   = put (fromIntegral i :: Word)
-    get     = liftM fromIntegral (get :: Get Word)
+    get     = liftM toInt32 (get :: Get Word)
+      where
+       -- restrict to 32 bits (for PGF portability, TH 2013-02-13)
+       toInt32 w = fromIntegral (fromIntegral w::Int32)::Int
 
 ------------------------------------------------------------------------
 -- 
@@ -747,9 +766,13 @@ instance (Binary e) => Binary (Seq.Seq e) where
 ------------------------------------------------------------------------
 -- Floating point
 
+-- instance Binary Double where
+--     put d = put (decodeFloat d)
+--     get   = liftM2 encodeFloat get get
+
 instance Binary Double where
-    put d = put (decodeFloat d)
-    get   = liftM2 encodeFloat get get
+    put = putFloat64be
+    get = getFloat64be
 
 instance Binary Float where
     put f = put (decodeFloat f)

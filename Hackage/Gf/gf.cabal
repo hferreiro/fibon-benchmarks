@@ -1,17 +1,56 @@
 name: gf
-version: 3.1.6.2
-cabal-version: >= 1.2
+version: 3.5
+
+cabal-version: >= 1.8
 build-type: Custom
-license: GPL
+license: OtherLicense
 license-file: LICENSE
 category: Natural Language Processing, Compiler
 synopsis: Grammatical Framework
 description: GF, Grammatical Framework, is a programming language for multilingual grammar applications
-homepage: http://www.grammaticalframework.org
+homepage: http://www.grammaticalframework.org/
 bug-reports: http://code.google.com/p/grammatical-framework/issues/list
+tested-with: GHC==7.4.2, GHC==7.6.2
+
+data-dir: src
+data-files: www/*.html
+	    www/P/*.png
+	    www/gfse/*.html
+	    www/gfse/*.css
+	    www/gfse/*.js
+	    www/gfse/P/*.png
+	    www/gfse/P/*.jpg
+            www/js/*.js
+	    www/minibar/*.html
+	    www/minibar/*.css
+	    www/minibar/*.js
+	    www/minibar/*.png
+	    www/syntax-editor/*.html
+	    www/syntax-editor/*.css
+	    www/syntax-editor/*.js
+	    www/TransQuiz/*.html
+	    www/TransQuiz/*.css
+	    www/TransQuiz/*.js
+	    www/TransQuiz/*.png
+	    www/translator/*.html
+	    www/translator/*.css
+	    www/translator/*.js
+
+source-repository head
+  type:     darcs
+  location: http://www.grammaticalframework.org/
+
 
 flag interrupt
   Description: Enable Ctrl+Break in the shell
+  Default:     True
+
+flag server
+  Description: Include --server mode
+  Default:     False
+
+flag new-comp
+  Description: Make -new-comp the default
   Default:     True
 
 library
@@ -20,9 +59,10 @@ library
                  array,
                  containers,
                  bytestring,
-                 random
-  ghc-options: -O2
-  hs-source-dirs: src/compiler src/runtime/haskell
+                 random,
+                 pretty,
+                 mtl
+  hs-source-dirs: src/compiler src/runtime/haskell fst
   extensions: 
   exposed-modules: 
     PGF
@@ -33,9 +73,11 @@ library
     PGF.Generate
     PGF.Linearize
     PGF.Parse
+    PGF.SortTop
     PGF.Expr
     PGF.Type
     PGF.Tree
+    PGF.Tokenizer
     PGF.Paraphrase
     PGF.TypeCheck
     PGF.Binary
@@ -43,6 +85,9 @@ library
     PGF.VisualizeTree
     PGF.Printer
     PGF.Probabilistic
+    PGF.Forest
+    PGF.Optimize
+    PGF.Signature
     GF.Data.TrieMap
     GF.Data.Utilities
     GF.Data.SortedList
@@ -55,52 +100,73 @@ library
     Data.Binary.Put
     Data.Binary.Get
     Data.Binary.Builder
+    Data.Binary.IEEE754
 
 executable Gf
-  build-depends: base >= 4.2,
+  build-depends: base >= 4.2 && <5,
                  array,
                  containers,
                  bytestring,
                  filepath,
                  directory,
                  random,
+                 time,
                  old-time,
+                 old-locale,
                  process,
                  pretty,
                  mtl,
                  haskeline,
+                 parallel>=3,
                  deepseq
-  build-tools: happy, alex
+  ghc-options: -threaded
+  if flag(server)
+    build-depends: httpd-shed, network, json, cgi
+                   -- ,silently
+    cpp-options: -DSERVER_MODE
+    other-modules: GFServer
+    hs-source-dirs: src/server src/server/transfer src/example-based
+
+  if flag(new-comp)
+    cpp-options: -DNEW_COMP
+
+  build-tools: happy
+           --, alex>=2 && <3 -- tricky to install in Ubuntu 12.04
   if os(windows)
     build-depends: Win32
   else
     build-depends: unix
-  hs-source-dirs: src/compiler src/runtime/haskell ../../../../../tools/fibon-run
+
+  ghc-prof-options: -auto-all
+
+  if impl(ghc>=7.0)
+    ghc-options: -rtsopts
+  hs-source-dirs: src/compiler src/runtime/haskell fst time-compat/src utf8-string ../../../../../tools/fibon-run
   extensions:
   main-is: GF.hs
   other-modules:
     GF.Data.BacktrackM
-    GF.JavaScript.AbsJS
-    GF.JavaScript.PrintJS
-    GF.Infra.CompactPrint
     GF.Data.TrieMap
     GF.Data.Utilities
     GF.Data.SortedList
     GF.Data.ErrM
     GF.Data.Operations
-    GF.Infra.Ident
-    GF.Grammar.Predef
     GF.Data.Str
-    GF.Data.Zipper
+    GF.JavaScript.AbsJS
+    GF.JavaScript.PrintJS
+    GF.Infra.Ident
     GF.Infra.GetOpt
     GF.Infra.Option
     GF.Infra.UseIO
+    GF.Infra.CheckM
+    GF.System.Catch
+    GF.System.Console
+    GF.System.Signal
     GF.Command.Commands
     GF.Command.Interpreter
     GF.Command.Abstract
     GF.Command.Parse
     GF.Command.Importing
-    GF.Infra.Modules
     GF.Grammar
     GF.Grammar.Lexer
     GF.Grammar.Parser
@@ -115,27 +181,32 @@ executable Gf
     GF.Grammar.Printer
     GF.Grammar.ShowTerm
     GF.Grammar.Binary
-    GF.Infra.CheckM
     GF.Compile.Update
     GF.Compile.CheckGrammar
     GF.Compile.Refresh
     GF.Compile.Rename
     GF.Compile.ReadFiles
     GF.Compile.GrammarToPGF
-    GF.Compile.Concrete.TypeCheck
-    GF.Compile.Concrete.Compute
-    GF.Compile.Concrete.AppPredefined
-    GF.Compile.Abstract.TC
-    GF.Compile.Abstract.TypeCheck
-    GF.Compile.Abstract.Compute
+    GF.Compile.ToAPI
+    GF.Compile.TypeCheck.Abstract
+    GF.Compile.TypeCheck.Concrete
+    GF.Compile.TypeCheck.ConcreteNew
+    GF.Compile.TypeCheck.TC
+    GF.Compile.Compute.Abstract
+    GF.Compile.Compute.Concrete
+    GF.Compile.Compute.ConcreteNew1
+    GF.Compile.Compute.ConcreteNew
+    GF.Compile.Compute.AppPredefined
+    GF.Compile.Compute.Value
+    GF.Compile.Compute.Predef
     GF.Compile.Optimize
     GF.Compile.SubExOpt
-    GF.Compile.ModDeps
     GF.Compile.GetGrammar
     GF.Compile.PGFtoHaskell
     GF.Compile.PGFtoProlog
     GF.Compile.PGFtoJS
     GF.Compile
+    GF.Index
     GF.Quiz
     PGF
     PGF.CId
@@ -151,6 +222,7 @@ executable Gf
     PGF.TypeCheck
     PGF.Binary
     PGF.Printer
+    PGF.Optimize
     GFC
     GFI
 

@@ -7,18 +7,25 @@ module GF.Data.TrieMap
          , lookup
          
          , null
+         , compose
          , decompose
          
          , insertWith
 
-         , unionWith
-         , unionsWith
+         , union,  unionWith
+         , unions, unionsWith
          
          , elems
+         , toList
+         , fromList, fromListWith
+
+         , map
+         , mapWithKey
          ) where
 
-import Prelude hiding (lookup, null)
+import Prelude hiding (lookup, null, map)
 import qualified Data.Map as Map
+import Data.List (foldl')
 
 data TrieMap k v = Tr (Maybe v) (Map.Map k (TrieMap k v))
 
@@ -36,6 +43,9 @@ null :: TrieMap k v -> Bool
 null (Tr Nothing m) = Map.null m
 null _              = False
 
+compose :: Maybe v -> Map.Map k (TrieMap k v) -> TrieMap k v
+compose mb_v m = Tr mb_v m
+
 decompose :: TrieMap k v -> (Maybe v, Map.Map k (TrieMap k v))
 decompose (Tr mb_v m) = (mb_v,m)
 
@@ -47,6 +57,9 @@ insertWith f (k:ks) v0 (Tr mb_v m) = case Map.lookup k m of
                                        Nothing -> Tr mb_v (Map.insert k (singleton ks v0) m)
                                        Just tr -> Tr mb_v (Map.insert k (insertWith f ks v0 tr) m)
 
+union :: Ord k => TrieMap k v -> TrieMap k v -> TrieMap k v
+union = unionWith (\a b -> a)
+
 unionWith :: Ord k => (v -> v -> v) -> TrieMap k v -> TrieMap k v -> TrieMap k v
 unionWith f (Tr mb_v1 m1) (Tr mb_v2 m2) =
   let mb_v = case (mb_v1,mb_v2) of
@@ -57,6 +70,9 @@ unionWith f (Tr mb_v1 m1) (Tr mb_v2 m2) =
       m    = Map.unionWith (unionWith f) m1 m2
   in Tr mb_v m
 
+unions :: Ord k => [TrieMap k v] -> TrieMap k v
+unions = foldl union empty
+
 unionsWith :: Ord k => (v -> v -> v) -> [TrieMap k v] -> TrieMap k v
 unionsWith f = foldl (unionWith f) empty
 
@@ -64,3 +80,20 @@ elems :: TrieMap k v -> [v]
 elems tr = collect tr []
   where
     collect (Tr mb_v m) xs = maybe id (:) mb_v (Map.fold collect xs m)
+
+toList :: TrieMap k v -> [([k],v)]
+toList tr = collect [] tr []
+  where
+    collect ks (Tr mb_v m) xs = maybe id (\v -> (:) (ks,v)) mb_v (Map.foldWithKey (\k -> collect (k:ks)) xs m)
+
+fromListWith :: Ord k => (v -> v -> v) -> [([k],v)] -> TrieMap k v
+fromListWith f xs = foldl' (\trie (ks,v) -> insertWith f ks v trie) empty xs
+
+fromList :: Ord k => [([k],v)] -> TrieMap k v
+fromList xs = fromListWith const xs
+
+map :: (a -> b) -> TrieMap k a -> TrieMap k b
+map f (Tr mb_v m) = Tr (fmap f mb_v) (Map.map (map f) m)
+
+mapWithKey :: ([k] -> a -> b) -> TrieMap k a -> TrieMap k b
+mapWithKey f (Tr mb_v m) = Tr (fmap (f []) mb_v) (Map.mapWithKey (\k -> mapWithKey (f . (k:))) m)

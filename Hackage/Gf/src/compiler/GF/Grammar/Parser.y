@@ -5,10 +5,10 @@ module GF.Grammar.Parser
          , pModDef
          , pModHeader
          , pExp
+         , pTopDef
          ) where
 
 import GF.Infra.Ident
-import GF.Infra.Modules
 import GF.Infra.Option
 import GF.Data.Operations
 import GF.Grammar.Predef
@@ -17,9 +17,12 @@ import GF.Grammar.Macros
 import GF.Grammar.Lexer
 import qualified Data.ByteString.Char8 as BS
 import GF.Compile.Update (buildAnyTree)
+import Codec.Binary.UTF8.String(decodeString)
+import Data.Char(toLower)
 }
 
 %name pModDef ModDef
+%name pTopDef TopDef
 %partial pModHeader ModHeader
 %name pExp Exp
 
@@ -112,18 +115,18 @@ ModDef
                                           (mtype,id) = $2
                                           (extends,with,content) = $4
                                           (opens,jments,opts) = case content of { Just c -> c; Nothing -> ([],[],noOptions) }
-                                      mapM_ (checkInfoType mtype) jments
+                                      jments <- mapM (checkInfoType mtype) jments
                                       defs <- case buildAnyTree id jments of
                                                 Ok x    -> return x
-                                                Bad msg -> fail msg
-                                      return (id, ModInfo mtype mstat opts extends with opens [] defs)  }
+                                                Bad msg -> fail (optDecode opts msg)
+                                      return (id, ModInfo mtype mstat opts extends with opens [] "" Nothing defs)  }
 
 ModHeader :: { SourceModule }
 ModHeader
   : ComplMod ModType '=' ModHeaderBody { let { mstat = $1 ;
                                                (mtype,id) = $2 ;
                                                (extends,with,opens) = $4 }
-                                         in (id, ModInfo mtype mstat noOptions extends with opens [] emptyBinTree) }
+                                         in (id, ModInfo mtype mstat noOptions extends with opens [] "" Nothing emptyBinTree) }
 
 ComplMod :: { ModuleStatus }
 ComplMod 
@@ -132,11 +135,11 @@ ComplMod
 
 ModType :: { (ModuleType,Ident) }
 ModType
-  : 'abstract'  Ident                    { (MTAbstract,      $2) } 
-  | 'resource'  Ident                    { (MTResource,      $2) }
-  | 'interface' Ident                    { (MTInterface,     $2) }
-  | 'concrete'  Ident 'of' Ident         { (MTConcrete $4,   $2) }
-  | 'instance'  Ident 'of' Ident         { (MTInstance $4,   $2) }
+  : 'abstract'  Ident                     { (MTAbstract,      $2) } 
+  | 'resource'  Ident                     { (MTResource,      $2) }
+  | 'interface' Ident                     { (MTInterface,     $2) }
+  | 'concrete'  Ident 'of' Ident          { (MTConcrete $4,   $2) }
+  | 'instance'  Ident 'of' Included       { (MTInstance $4,   $2) }
 
 ModHeaderBody :: { ( [(Ident,MInclude)]
                    , Maybe (Ident,MInclude,[(Ident,Ident)])
@@ -218,11 +221,11 @@ TopDef
   | 'data'            ListDataDef     { Left  $2 }
   | 'param'           ListParamDef    { Left  $2 }
   | 'oper'            ListOperDef     { Left  $2 }
-  | 'lincat'          ListTermDef     { Left  [(f, CncCat (Just e) Nothing    Nothing   ) | (f,e) <- $2] }
-  | 'lindef'          ListTermDef     { Left  [(f, CncCat Nothing    (Just e) Nothing   ) | (f,e) <- $2] }
+  | 'lincat'          ListTermDef     { Left  [(f, CncCat (Just e) Nothing    Nothing Nothing) | (f,e) <- $2] }
+  | 'lindef'          ListTermDef     { Left  [(f, CncCat Nothing    (Just e) Nothing Nothing) | (f,e) <- $2] }
   | 'lin'             ListLinDef      { Left  $2 }
-  | 'printname' 'cat' ListTermDef     { Left  [(f, CncCat Nothing    Nothing (Just e)) | (f,e) <- $3] }
-  | 'printname' 'fun' ListTermDef     { Left  [(f, CncFun Nothing Nothing (Just e)) | (f,e) <- $3] }
+  | 'printname' 'cat' ListTermDef     { Left  [(f, CncCat Nothing    Nothing (Just e) Nothing) | (f,e) <- $3] }
+  | 'printname' 'fun' ListTermDef     { Left  [(f, CncFun Nothing Nothing (Just e) Nothing) | (f,e) <- $3] }
   | 'flags'           ListFlagDef     { Right $2 }
 
 CatDef :: { [(Ident,Info)] }
@@ -233,25 +236,25 @@ CatDef
 
 FunDef :: { [(Ident,Info)] }
 FunDef
-  : Posn ListIdent ':' Exp Posn { [(fun, AbsFun (Just (mkL $1 $5 $4)) Nothing (Just [])) | fun <- $2] } 
+  : Posn ListIdent ':' Exp Posn { [(fun, AbsFun (Just (mkL $1 $5 $4)) Nothing (Just []) (Just True)) | fun <- $2] } 
 
 DefDef :: { [(Ident,Info)] }
 DefDef
-  : Posn ListName '=' Exp         Posn { [(f, AbsFun Nothing (Just 0)           (Just [mkL $1 $5 ([],$4)])) | f <- $2] }
-  | Posn Name ListPatt '=' Exp    Posn { [($2,AbsFun Nothing (Just (length $3)) (Just [mkL $1 $6 ($3,$5)]))] }
+  : Posn ListName '=' Exp         Posn { [(f, AbsFun Nothing (Just 0)           (Just [mkL $1 $5 ([],$4)]) Nothing) | f <- $2] }
+  | Posn Name ListPatt '=' Exp    Posn { [($2,AbsFun Nothing (Just (length $3)) (Just [mkL $1 $6 ($3,$5)]) Nothing)] }
 
 DataDef :: { [(Ident,Info)] }
 DataDef
   : Posn Ident '=' ListDataConstr Posn { ($2,   AbsCat Nothing) :
-                                         [(fun, AbsFun Nothing   Nothing Nothing) | fun <- $4] }
+                                         [(fun, AbsFun Nothing Nothing Nothing  (Just True)) | fun <- $4] }
   | Posn ListIdent ':' Exp Posn        { -- (snd (valCat $4), AbsCat Nothing) :
-                                         [(fun, AbsFun (Just (mkL $1 $5 $4)) Nothing Nothing) | fun <- $2] }                                         
+                                         [(fun, AbsFun (Just (mkL $1 $5 $4)) Nothing Nothing (Just True)) | fun <- $2] }                                         
 
 ParamDef :: { [(Ident,Info)] }
 ParamDef
-  : Ident '=' ListParConstr { ($1, ResParam (Just $3) Nothing) :
-                              [(f, ResValue (L loc (mkProdSimple co (Cn $1)))) | L loc (f,co) <- $3] }
-  | Ident                   { [($1, ResParam Nothing Nothing)] }
+  : Posn Ident '=' ListParConstr Posn { ($2, ResParam (Just (mkL $1 $5 [param | L loc param <- $4])) Nothing) :
+                                        [(f, ResValue (L loc (mkProdSimple co (Cn $2)))) | L loc (f,co) <- $4] }
+  | Posn Ident                   Posn { [($2, ResParam Nothing Nothing)] }
 
 OperDef :: { [(Ident,Info)] }
 OperDef
@@ -262,8 +265,8 @@ OperDef
 
 LinDef :: { [(Ident,Info)] }
 LinDef
-  : Posn ListName '=' Exp         Posn { [(f,  CncFun Nothing (Just (mkL $1 $5 $4)) Nothing) | f <- $2] }
-  | Posn Name ListArg '=' Exp     Posn { [($2, CncFun Nothing (Just (mkL $1 $6 (mkAbs $3 $5))) Nothing)] }
+  : Posn ListName '=' Exp         Posn { [(f,  CncFun Nothing (Just (mkL $1 $5 $4)) Nothing Nothing) | f <- $2] }
+  | Posn Name ListArg '=' Exp     Posn { [($2, CncFun Nothing (Just (mkL $1 $6 (mkAbs $3 $5))) Nothing Nothing)] }
 
 TermDef :: { [(Ident,L Term)] }
 TermDef
@@ -272,6 +275,9 @@ TermDef
 FlagDef :: { Options }
 FlagDef
   : Posn Ident '=' Ident Posn  {% case parseModuleOptions ["--" ++ showIdent $2 ++ "=" ++ showIdent $4] of
+                                    Ok  x   -> return x
+                                    Bad msg -> failLoc $1 msg                                           } 
+  | Posn Ident '=' Double Posn {% case parseModuleOptions ["--" ++ showIdent $2 ++ "=" ++ show $4] of
                                     Ok  x   -> return x
                                     Bad msg -> failLoc $1 msg                                           } 
 
@@ -417,8 +423,8 @@ Exp4
                                        in S (T annot $5) $2         }
   | 'variants' '{' ListExp '}'       { FV $3         }
   | 'pre' '{' ListCase '}'           {% mkAlts $3     }
-  | 'pre' '{' String ';' ListAltern '}' { Alts (K $3, $5) }
-  | 'pre' '{' Ident ';' ListAltern '}' { Alts (Vr $3, $5) }
+  | 'pre' '{' String ';' ListAltern '}' { Alts (K $3) $5 }
+  | 'pre' '{' Ident ';' ListAltern '}' { Alts (Vr $3) $5 }
   | 'strs' '{' ListExp '}'           { Strs $3       }
   | '#' Patt3                        { EPatt $2      }
   | 'pattern' Exp5                   { EPattType $2  }
@@ -468,7 +474,7 @@ Patt
 Patt1 :: { Patt }
 Patt1
   : Ident ListPatt            { PC $1 $2 } 
-  | Ident '.' Ident ListPatt  { PP $1 $3 $4 }
+  | Ident '.' Ident ListPatt  { PP ($1,$3) $4 }
   | Patt3 '*'                 { PRep $1 }
   | Patt2                     { $1 }
 
@@ -484,10 +490,10 @@ Patt3
   : '?'                       { PChar } 
   | '[' String ']'            { PChars $2 }
   | '#' Ident                 { PMacro $2 }
-  | '#' Ident '.' Ident       { PM $2 $4 }
+  | '#' Ident '.' Ident       { PM ($2,$4) }
   | '_'                       { PW }
   | Ident                     { PV $1 }
-  | Ident '.' Ident           { PP $1 $3 [] }
+  | Ident '.' Ident           { PP ($1,$3) [] }
   | Integer                   { PInt $1 }
   | Double                    { PFloat  $1 }
   | String                    { PString $1 }
@@ -552,7 +558,7 @@ ListBind
 Decl :: { [Hypo] }
 Decl
   : '(' ListBind ':' Exp ')' { [(b,x,$4) | (b,x) <- $2] } 
-  | Exp4                     { [mkHypo $1]              }
+  | Exp3                     { [mkHypo $1]              }
 
 ListTupleComp :: { [Term] }
 ListTupleComp
@@ -602,7 +608,13 @@ Posn
 {
 
 happyError :: P a
-happyError = fail "parse error"
+happyError = fail "syntax error"
+
+-- Quick fix to render error messages from UTF-8-encoded source files correctly.
+optDecode opts =
+    if map toLower (flag optEncoding opts) `elem` ["utf8","utf-8"]
+    then decodeString
+    else id
 
 mkListId,mkConsId,mkBaseId  :: Ident -> Ident
 mkListId = prefixId (BS.pack "List")
@@ -620,8 +632,8 @@ listCatDef (L loc (id,cont,size)) = [catd,nilfund,consfund]
     consId = mkConsId id
 
     catd     = (listId, AbsCat (Just (L loc cont')))
-    nilfund  = (baseId, AbsFun (Just (L loc niltyp))  Nothing Nothing)
-    consfund = (consId, AbsFun (Just (L loc constyp)) Nothing Nothing)
+    nilfund  = (baseId, AbsFun (Just (L loc niltyp))  Nothing Nothing (Just True))
+    consfund = (consId, AbsFun (Just (L loc constyp)) Nothing Nothing (Just True))
 
     cont' = [(b,mkId x i,ty) | (i,(b,x,ty)) <- zip [0..] cont]
     xs = map (\(b,x,t) -> Vr x) cont'
@@ -671,44 +683,44 @@ isOverloading t =
     Vr keyw | showIdent keyw == "overload" -> True      -- overload is a "soft keyword"
     _                                      -> False
 
-checkInfoType mt (id,info) =
+checkInfoType mt jment@(id,info) =
   case info of
-    AbsCat pcont      -> ifAbstract mt (locPerh pcont)
-    AbsFun pty _ pde  -> ifAbstract mt (locPerh pty ++ maybe [] locAll pde)
-    CncCat pty pd ppn -> ifConcrete mt (locPerh pty ++ locPerh pd ++ locPerh ppn)
-    CncFun _   pd ppn -> ifConcrete mt (locPerh pd ++ locPerh ppn)
-    ResParam pparam _ -> ifResource mt (maybe [] locAll pparam)
-    ResValue ty       -> ifResource mt (locL ty)
-    ResOper  pty pt   -> ifResource mt (locPerh pty ++ locPerh pt)
-    ResOverload _ xs  -> ifResource mt (concat [[loc1,loc2] | (L loc1 _,L loc2 _) <- xs])
+    AbsCat pcont         -> ifAbstract mt (locPerh pcont)
+    AbsFun pty _ pde _   -> ifAbstract mt (locPerh pty ++ maybe [] locAll pde)
+    CncCat pty pd ppn _  -> ifConcrete mt (locPerh pty ++ locPerh pd ++ locPerh ppn)
+    CncFun _   pd ppn _  -> ifConcrete mt (locPerh pd ++ locPerh ppn)
+    ResParam pparam _    -> ifResource mt (locPerh pparam)
+    ResValue ty          -> ifResource mt (locL ty)
+    ResOper  pty pt      -> ifOper mt pty pt
+    ResOverload _ xs     -> ifResource mt (concat [[loc1,loc2] | (L loc1 _,L loc2 _) <- xs])
   where
-    locPerh :: Maybe (L a) -> [(Int, Int)]
     locPerh = maybe [] locL
-    locAll  :: [(L a)] -> [(Int, Int)]
     locAll xs = [loc | L loc x <- xs]
-    locL    :: (L a) -> [(Int, Int)]
     locL (L loc x) = [loc]
     
-    illegal ((s,e):_) = failLoc (Pn s 0) "illegal definition"
-    illegal _         = return ()
+    illegal (Local s e:_) = failLoc (Pn s 0) "illegal definition"
+    illegal _             = return jment
 
-    ifAbstract MTAbstract     locs = return ()
+    ifAbstract MTAbstract     locs = return jment
     ifAbstract _              locs = illegal locs
 
-    ifConcrete (MTConcrete _) locs = return ()
+    ifConcrete (MTConcrete _) locs = return jment
     ifConcrete _              locs = illegal locs
 
-    ifResource (MTConcrete _) locs = return ()
-    ifResource (MTInstance _) locs = return ()
-    ifResource MTInterface    locs = return ()
-    ifResource MTResource     locs = return ()
+    ifResource (MTConcrete _) locs = return jment
+    ifResource (MTInstance _) locs = return jment
+    ifResource MTInterface    locs = return jment
+    ifResource MTResource     locs = return jment
     ifResource _              locs = illegal locs
+    
+    ifOper MTAbstract pty pt = return (id,AbsFun pty (fmap (const 0) pt) (Just (maybe [] (\(L l t) -> [L l ([],t)]) pt)) (Just False))
+    ifOper _          pty pt = return jment
 
 mkAlts cs = case cs of
   _:_ -> do
     def  <- mkDef (last cs)
     alts <- mapM mkAlt (init cs)
-    return (Alts (def,alts))
+    return (Alts def alts)
   _ -> fail "empty alts"
  where
    mkDef (_,t) = return t
@@ -723,10 +735,10 @@ mkAlts cs = case cs of
      PString s -> return $ Strs [K s]
      PV x -> return (Vr x) --- for macros; not yet complete
      PMacro x -> return (Vr x) --- for macros; not yet complete
-     PM m c -> return (Q m c) --- for macros; not yet complete
+     PM c -> return (Q c) --- for macros; not yet complete
      _ -> fail "no strs from pattern"
 
 mkL :: Posn -> Posn -> x -> L x
-mkL (Pn l1 _) (Pn l2 _) x = L (l1,l2) x
+mkL (Pn l1 _) (Pn l2 _) x = L (Local l1 l2) x
 
 }

@@ -27,7 +27,6 @@ import GF.Grammar.Grammar
 import GF.Grammar.Lookup
 import GF.Infra.Ident
 import qualified GF.Grammar.Macros as C
-import qualified GF.Infra.Modules as M
 import GF.Data.Operations
 
 import Control.Monad
@@ -38,30 +37,30 @@ import Data.List
 
 subexpModule :: SourceModule -> SourceModule
 subexpModule (n,mo) = errVal (n,mo) $ do
-  let ljs = tree2list (M.jments mo)
+  let ljs = tree2list (jments mo)
   (tree,_) <- appSTM (getSubtermsMod n ljs) (Map.empty,0)
   js2 <- liftM buildTree $ addSubexpConsts n tree $ ljs
-  return (n,M.replaceJudgements mo js2)
+  return (n,mo{jments=js2})
 
 unsubexpModule :: SourceModule -> SourceModule
 unsubexpModule sm@(i,mo)
-  | hasSub ljs = (i,M.replaceJudgements mo (rebuild (map unparInfo ljs)))
+  | hasSub ljs = (i,mo{jments=rebuild (map unparInfo ljs)})
   | otherwise  = sm
   where
-    ljs = tree2list (M.jments mo) 
+    ljs = tree2list (jments mo) 
 
     -- perform this iff the module has opers
     hasSub ljs = not $ null [c | (c,ResOper _ _) <- ljs]
     unparInfo (c,info) = case info of
-      CncFun xs (Just (L loc t)) m -> [(c, CncFun xs (Just (L loc (unparTerm t))) m)]
+      CncFun xs (Just (L loc t)) m pf -> [(c, CncFun xs (Just (L loc (unparTerm t))) m pf)]
       ResOper (Just (L loc (EInt 8))) _ -> [] -- subexp-generated opers
       ResOper pty (Just (L loc t)) -> [(c, ResOper pty (Just (L loc (unparTerm t))))]
       _ -> [(c,info)]
     unparTerm t = case t of
-      Q m c | isOperIdent c -> --- name convention of subexp opers
-        errVal t $ liftM unparTerm $ lookupResDef gr m c 
+      Q (m,c) | isOperIdent c -> --- name convention of subexp opers
+        errVal t $ liftM unparTerm $ lookupResDef gr (m,c)
       _ -> C.composSafeOp unparTerm t
-    gr = M.MGrammar [sm] 
+    gr = mGrammar [sm]
     rebuild = buildTree . concat
 
 -- implementation
@@ -76,20 +75,20 @@ addSubexpConsts mo tree lins = do
   mapM mkOne $ opers ++ lins
  where
    mkOne (f,def) = case def of
-     CncFun xs (Just (L loc trm)) pn -> do
+     CncFun xs (Just (L loc trm)) pn pf -> do
        trm' <- recomp f trm
-       return (f,CncFun xs (Just (L loc trm')) pn)
+       return (f,CncFun xs (Just (L loc trm')) pn pf)
      ResOper ty (Just (L loc trm)) -> do
        trm' <- recomp f trm
        return (f,ResOper ty (Just (L loc trm')))
      _ -> return (f,def)
    recomp f t = case Map.lookup t tree of
-     Just (_,id) | operIdent id /= f -> return $ Q mo (operIdent id)
+     Just (_,id) | operIdent id /= f -> return $ Q (mo, operIdent id)
      _ -> C.composOp (recomp f) t
 
    list = Map.toList tree
 
-   oper id trm = (operIdent id, ResOper (Just (L (0,0) (EInt 8))) (Just (L (0,0) trm))) 
+   oper id trm = (operIdent id, ResOper (Just (L NoLoc (EInt 8))) (Just (L NoLoc trm))) 
    --- impossible type encoding generated opers
 
 getSubtermsMod :: Ident -> [(Ident,Info)] -> TermM (Map Term (Int,Int))
@@ -99,7 +98,7 @@ getSubtermsMod mo js = do
   return $ Map.filter (\ (nu,_) -> nu > 1) tree0
  where
    getInfo get fi@(f,i) = case i of
-     CncFun xs (Just (L _ trm)) pn -> do
+     CncFun xs (Just (L _ trm)) pn _ -> do
        get trm
        return $ fi
      ResOper ty (Just (L _ trm)) -> do

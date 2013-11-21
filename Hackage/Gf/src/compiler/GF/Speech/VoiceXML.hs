@@ -11,7 +11,6 @@ import GF.Data.Str (sstrV)
 import GF.Data.Utilities
 import GF.Data.XML
 import GF.Infra.Ident
-import GF.Infra.Modules
 import PGF
 import PGF.Data
 import PGF.Macros
@@ -39,9 +38,8 @@ grammar2vxml pgf cnc = showsXMLDoc (skel2vxml name language start skel qs) ""
 type Skeleton = [(CId, [(CId, [CId])])]
 
 pgfSkeleton :: PGF -> Skeleton
-pgfSkeleton pgf = [(c,[(f,fst (catSkeleton (lookType pgf f))) | f <- fs]) 
-                   | (c,(_,fs)) <- Map.toList (cats (abstract pgf)),
-                     not (isLiteralCat c)]
+pgfSkeleton pgf = [(c,[(f,fst (catSkeleton (lookType (abstract pgf) f))) | (_,f) <- fs]) 
+                   | (c,(_,fs,_)) <- Map.toList (cats (abstract pgf))]
 
 --
 -- * Questions to ask 

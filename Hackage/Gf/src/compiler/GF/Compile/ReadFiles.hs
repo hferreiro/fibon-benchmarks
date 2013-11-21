@@ -23,10 +23,11 @@ module GF.Compile.ReadFiles
              gfoFile,gfFile,isGFO,gf2gfo,
              getOptionsFromFile) where
 
+import Prelude hiding (catch)
+import GF.System.Catch
 import GF.Infra.UseIO
 import GF.Infra.Option
 import GF.Infra.Ident
-import GF.Infra.Modules
 import GF.Data.Operations
 import GF.Grammar.Lexer
 import GF.Grammar.Parser
@@ -39,13 +40,14 @@ import Data.List
 import Data.Maybe(isJust)
 import qualified Data.ByteString.Char8 as BS
 import qualified Data.Map as Map
-import System.Time
+import Data.Time
+import Data.Time.Compat (toUTCTime)
 import System.Directory
 import System.FilePath
 import Text.PrettyPrint
 
 type ModName = String
-type ModEnv  = Map.Map ModName (ClockTime,[ModName])
+type ModEnv  = Map.Map ModName (UTCTime,[ModName])
 
 
 -- | Returns a list of all files to be compiled in topological order i.e.
@@ -54,18 +56,18 @@ getAllFiles :: Options -> [InitPath] -> ModEnv -> FileName -> IOE [FullPath]
 getAllFiles opts ps env file = do
   -- read module headers from all files recursively
   ds <- liftM reverse $ get [] [] (justModuleName file)
-  ioeIO $ putIfVerb opts $ "all modules:" +++ show [name | (name,_,_,_,_) <- ds]
+  ioeIO $ putIfVerb opts $ "all modules:" +++ show [name | (name,_,_,_,_,_) <- ds]
   return $ paths ds
   where
     -- construct list of paths to read
     paths ds = concatMap mkFile ds
       where
-        mkFile (f,st,gfTime,gfoTime,p) =
+        mkFile (f,st,time,has_src,imps,p) =
           case st of 
-            CSComp                 -> [p </> gfFile f]
-            CSRead | isJust gfTime -> [gf2gfo opts (p </> gfFile f)]
-                   | otherwise     -> [p </> gfoFile f]
-            CSEnv                  -> []
+            CSComp             -> [p </> gfFile f]
+            CSRead | has_src   -> [gf2gfo opts (p </> gfFile f)]
+                   | otherwise -> [p </> gfoFile f]
+            CSEnv              -> []
 
     -- | traverses the dependency graph and returns a topologicaly sorted
     -- list of ModuleInfo. An error is raised if there is circular dependency
@@ -75,15 +77,17 @@ getAllFiles opts ps env file = do
         -> IOE [ModuleInfo]   -- ^ the final 
     get trc ds name
       | name `elem` trc = ioeErr $ Bad $ "circular modules" +++ unwords trc
-      | (not . null) [n | (n,_,_,_,_) <- ds, name == n]     --- file already read
+      | (not . null) [n | (n,_,_,_,_,_) <- ds, name == n]     --- file already read
                         = return ds
       | otherwise       = do
-           (name,st0,t0,imps,p) <- findModule name
+           (name,st0,t0,has_src,imps,p) <- findModule name
            ds <- foldM (get (name:trc)) ds imps
-           let (st,t) | (not . null) [f | (f,_,t1,_,_) <- ds, elem f imps && liftM2 (>=) t0 t1 /= Just True]
+           let (st,t) | has_src &&
+                        flag optRecomp opts == RecompIfNewer &&
+                        (not . null) [f | (f,st,t1,_,_,_) <- ds, elem f imps && liftM2 (>=) t0 t1 /= Just True]
                                   = (CSComp,Nothing)
                       | otherwise = (st0,t0)
-           return ((name,st,t,imps,p):ds)
+           return ((name,st,t,has_src,imps,p):ds)
 
     -- searches for module in the search path and if it is found
     -- returns 'ModuleInfo'. It fails if there is no such module
@@ -92,13 +96,13 @@ getAllFiles opts ps env file = do
       (file,gfTime,gfoTime) <- do
           mb_gfFile <- ioeIO $ getFilePath ps (gfFile name)
           case mb_gfFile of
-            Just gfFile -> do gfTime  <- ioeIO $ getModificationTime gfFile
-                              mb_gfoTime <- ioeIO $ catch (liftM Just $ getModificationTime (gf2gfo opts gfFile))
+            Just gfFile -> do gfTime  <- ioeIO $ toUTCTime `fmap` getModificationTime gfFile
+                              mb_gfoTime <- ioeIO $ catch (liftM Just $ toUTCTime `fmap` getModificationTime (gf2gfo opts gfFile))
                                                           (\_->return Nothing)
                               return (gfFile, Just gfTime, mb_gfoTime)
             Nothing     -> do mb_gfoFile <- ioeIO $ getFilePath (maybe id (:) (flag optGFODir opts) ps) (gfoFile name)
                               case mb_gfoFile of
-                                Just gfoFile -> do gfoTime <- ioeIO $ getModificationTime gfoFile
+                                Just gfoFile -> do gfoTime <- ioeIO $ toUTCTime `fmap` getModificationTime gfoFile
                                                    return (gfoFile, Nothing, Just gfoTime)
                                 Nothing      -> ioeErr $ Bad (render (text "File" <+> text (gfFile name) <+> text "does not exist." $$
                                                                       text "searched in:" <+> vcat (map text ps)))
@@ -107,16 +111,25 @@ getAllFiles opts ps env file = do
       let mb_envmod = Map.lookup name env
           (st,t) = selectFormat opts (fmap fst mb_envmod) gfTime gfoTime
 
-      (mname,imps) <- case st of
-                        CSEnv  -> return (name, maybe [] snd mb_envmod)
-                        CSRead -> ioeIO $ fmap importsOfModule (decodeModHeader ((if isGFO file then id else gf2gfo opts) file))
+      (st,(mname,imps)) <-
+                      case st of
+                        CSEnv  -> return (st, (name, maybe [] snd mb_envmod))
+                        CSRead -> do mb_mo <- ioeIO $ decodeModuleHeader ((if isGFO file then id else gf2gfo opts) file)
+                                     case mb_mo of
+                                       Just mo -> return (st,importsOfModule mo)
+                                       Nothing
+                                         | isGFO file -> ioeErr $ Bad (file ++ " is compiled with different GF version and I can't find the source file")
+                                         | otherwise  -> do s <- ioeIO $ BS.readFile file
+                                                            case runP pModHeader s of
+                                                              Left (Pn l c,msg) -> ioeBad (file ++ ":" ++ show l ++ ":" ++ show c ++ ": " ++ msg)
+                                                              Right mo          -> return (CSComp,importsOfModule mo)
                         CSComp -> do s <- ioeIO $ BS.readFile file
                                      case runP pModHeader s of
                                        Left (Pn l c,msg) -> ioeBad (file ++ ":" ++ show l ++ ":" ++ show c ++ ": " ++ msg)
-                                       Right mo          -> return (importsOfModule mo)
+                                       Right mo          -> return (st,importsOfModule mo)
       ioeErr $ testErr (mname == name)
                        ("module name" +++ mname +++ "differs from file name" +++ name)
-      return (name,st,t,imps,dropFileName file)
+      return (name,st,t,isJust gfTime,imps,dropFileName file)
 
 isGFO :: FilePath -> Bool
 isGFO = (== ".gfo") . takeExtensions
@@ -135,7 +148,7 @@ gf2gfo opts file = maybe (gfoFile (dropExtension file))
 -- From the given Options and the time stamps computes
 -- whether the module have to be computed, read from .gfo or
 -- the environment version have to be used
-selectFormat :: Options -> Maybe ClockTime -> Maybe ClockTime -> Maybe ClockTime -> (CompStatus,Maybe ClockTime)
+selectFormat :: Options -> Maybe UTCTime -> Maybe UTCTime -> Maybe UTCTime -> (CompStatus,Maybe UTCTime)
 selectFormat opts mtenv mtgf mtgfo =
   case (mtenv,mtgfo,mtgf) of
     (_,_,Just tgf)         | fromSrc  -> (CSComp,Nothing)
@@ -160,23 +173,23 @@ data CompStatus =
  | CSEnv  -- gfo is in env
   deriving Eq
 
-type ModuleInfo = (ModName,CompStatus,Maybe ClockTime,[ModName],InitPath)
+type ModuleInfo = (ModName,CompStatus,Maybe UTCTime,Bool,[ModName],InitPath)
 
 importsOfModule :: SourceModule -> (ModName,[ModName])
 importsOfModule (m,mi) = (modName m,depModInfo mi [])
   where
     depModInfo mi =
       depModType (mtype mi)  .
-      depExtends (extend mi) .
+      depExtends (mextend mi) .
       depWith    (mwith mi)  .
       depExDeps  (mexdeps mi).
-      depOpens   (opens mi)
+      depOpens   (mopens mi)
 
     depModType (MTAbstract)       xs = xs
     depModType (MTResource)       xs = xs
     depModType (MTInterface)      xs = xs
     depModType (MTConcrete m2)    xs = modName m2:xs
-    depModType (MTInstance m2)    xs = modName m2:xs
+    depModType (MTInstance (m2,_))    xs = modName m2:xs
 
     depExtends es xs = foldr depInclude xs es
 

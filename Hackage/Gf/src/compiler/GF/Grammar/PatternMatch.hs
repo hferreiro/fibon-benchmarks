@@ -14,7 +14,8 @@
 
 module GF.Grammar.PatternMatch (matchPattern,
 		     testOvershadow, 
-		     findMatch
+		     findMatch,
+                     measurePatt
 		    ) where
 
 import GF.Data.Operations
@@ -28,7 +29,7 @@ import Control.Monad
 import Text.PrettyPrint
 import Debug.Trace
 
-matchPattern :: [(Patt,Term)] -> Term -> Err (Term, Substitution)
+matchPattern :: [(Patt,rhs)] -> Term -> Err (rhs, Substitution)
 matchPattern pts term = 
   if not (isInConstantForm term)
     then Bad (render (text "variables occur in" <+> ppTerm Unqualified 0 term))
@@ -57,7 +58,7 @@ testOvershadow pts vs = do
   ts <- mapM (liftM fst . matchPattern cases) vs
   return [p | (p,i) <- numpts, notElem i [i | EInt i <- ts] ]
 
-findMatch :: [([Patt],Term)] -> [Term] -> Err (Term, Substitution)
+findMatch :: [([Patt],rhs)] -> [Term] -> Err (rhs, Substitution)
 findMatch cases terms = case cases of
    [] -> Bad (render (text "no applicable case for" <+> hsep (punctuate comma (map (ppTerm Unqualified 0) terms))))
    (patts,_):_ | length patts /= length terms -> 
@@ -87,13 +88,13 @@ tryMatch (p,t) = do
          do matches <- mapM tryMatch (zip pp tt)
             return (concat matches)
 
-      (PP q p pp, ([], QC r f, tt)) | 
+      (PP (q,p) pp, ([], QC (r,f), tt)) | 
             -- q `eqStrIdent` r &&  --- not for inherited AR 10/10/2005
             p `eqStrIdent` f && length pp == length tt ->
          do matches <- mapM tryMatch (zip pp tt)
             return (concat matches)
       ---- hack for AppPredef bug
-      (PP q p pp, ([], Q r f, tt)) | 
+      (PP (q,p) pp, ([], Q (r,f), tt)) | 
             -- q `eqStrIdent` r && --- 
             p `eqStrIdent` f && length pp == length tt ->
          do matches <- mapM tryMatch (zip pp tt)
@@ -116,10 +117,8 @@ tryMatch (p,t) = do
         Bad _ -> return []
         _ -> Bad (render (text "no match with negative pattern" <+> ppPatt Unqualified 0 p))
 
-      (PSeq p1 p2, ([],K s, [])) -> do
-         let cuts = [splitAt n s | n <- [0 .. length s]] 
-         matches <- checks [mapM tryMatch [(p1,K s1),(p2,K s2)] | (s1,s2) <- cuts]
-         return (concat matches)
+      (PSeq p1 p2, ([],K s, [])) -> matchPSeq p1 p2 s
+      (PMSeq mp1 mp2, ([],K s, [])) -> matchPMSeq mp1 mp2 s
 
       (PRep p1, ([],K s, [])) -> checks [
          trym (foldr (const (PSeq p1)) (PString "") 
@@ -131,13 +130,56 @@ tryMatch (p,t) = do
       (PChars cs, ([],K [c], [])) | elem c cs -> return []
 
       _ -> Bad (render (text "no match in case expr for" <+> ppTerm Unqualified 0 t))
-  
+
+matchPMSeq (m1,p1) (m2,p2) s = matchPSeq' m1 p1 m2 p2 s
+--matchPSeq p1 p2 s = matchPSeq' (0,maxBound::Int) p1 (0,maxBound::Int) p2 s
+matchPSeq p1 p2 s = matchPSeq' (lengthBounds p1) p1 (lengthBounds p2) p2 s
+
+matchPSeq' b1@(min1,max1) p1 b2@(min2,max2) p2 s =
+  do let n = length s
+         lo = min1 `max` (n-max2)
+         hi = (n-min2) `min` max1
+         cuts = [splitAt i s | i <- [lo..hi]]
+     matches <- checks [mapM tryMatch [(p1,K s1),(p2,K s2)] | (s1,s2) <- cuts]
+     return (concat matches)
+
+-- | Estimate the minimal length of the string that a pattern will match
+minLength = matchLength 0 id (+) min -- safe underestimate
+
+-- | Estimate the maximal length of the string that a pattern will match
+maxLength =
+    maybe maxBound id . matchLength Nothing Just (liftM2 (+)) (liftM2 max)
+        -- safe overestimate
+
+matchLength unknown known seq alt = len
+  where
+    len p =
+      case p of
+        PString s  -> known (length s)
+        PSeq p1 p2 -> seq (len p1) (len p2)
+        PAlt p1 p2 -> alt (len p1) (len p2)
+        PChar      -> known 1
+        PChars _   -> known 1
+        PAs x p'   -> len p'
+        PT t p'    -> len p'
+        _          -> unknown
+
+lengthBounds p = (minLength p,maxLength p)
+
+mPatt p = (lengthBounds p,measurePatt p)
+
+measurePatt p =
+  case p of
+    PSeq p1 p2 -> PMSeq (mPatt p1) (mPatt p2)
+    _ -> composSafePattOp measurePatt p
+
+
 isInConstantForm :: Term -> Bool
 isInConstantForm trm = case trm of
     Cn _     -> True
     Con _    -> True
-    Q _ _    -> True
-    QC _ _   -> True
+    Q _      -> True
+    QC _     -> True
     Abs _ _ _ -> True
     C c a    -> isInConstantForm c && isInConstantForm a
     App c a  -> isInConstantForm c && isInConstantForm a
@@ -146,16 +188,16 @@ isInConstantForm trm = case trm of
     Empty    -> True
     EInt _   -> True
     _       -> False ---- isInArgVarForm trm
-
+{- -- unused and suspicuous, see contP in GF.Compile.Compute.Concrete instead
 varsOfPatt :: Patt -> [Ident]
 varsOfPatt p = case p of
   PV x -> [x]
   PC _ ps -> concat $ map varsOfPatt ps
-  PP _ _ ps -> concat $ map varsOfPatt ps
+  PP _ ps -> concat $ map varsOfPatt ps
   PR r    -> concat $ map (varsOfPatt . snd) r
   PT _ q -> varsOfPatt q
   _ -> []
-
+-}
 -- | to search matching parameter combinations in tables
 isMatchingForms :: [Patt] -> [Term] -> Bool
 isMatchingForms ps ts = all match (zip ps ts') where

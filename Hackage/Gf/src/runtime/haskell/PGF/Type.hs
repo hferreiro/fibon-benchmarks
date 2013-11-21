@@ -1,6 +1,7 @@
 module PGF.Type ( Type(..), Hypo,
                   readType, showType,
                   mkType, mkHypo, mkDepHypo, mkImplHypo,
+                  unType,
                   pType, ppType, ppHypo ) where
 
 import PGF.CId
@@ -51,6 +52,9 @@ mkDepHypo x ty = (Explicit,x,ty)
 mkImplHypo :: CId -> Type -> Hypo
 mkImplHypo x ty = (Implicit,x,ty)
 
+unType :: Type -> ([Hypo], CId, [Expr])
+unType (DTyp hyps cat es) = (hyps, cat, es)
+
 pType :: RP.ReadP Type
 pType = do
   RP.skipSpaces
@@ -63,27 +67,22 @@ pType = do
       do (cat,args) <- pAtom
          return [(Explicit,wildCId,DTyp [] cat args)]
       RP.<++
-      (RP.between (RP.char '(') (RP.char ')') $ do
-         xs <- RP.option [(Explicit,wildCId)] $ do
-                     xs <- pBinds
-                     RP.skipSpaces
-                     RP.char ':'
-                     return xs
-         ty <- pType
-         return [(b,v,ty) | (b,v) <- xs])
-      RP.<++
-      (RP.between (RP.char '{') (RP.char '}') $ do
-         vs <- RP.sepBy1 (RP.skipSpaces >> pCId) (RP.skipSpaces >> RP.char ',')
-         RP.skipSpaces
-         RP.char ':'
-         ty <- pType
-         return [(Implicit,v,ty) | v <- vs])
+      do RP.between (RP.char '(') (RP.char ')') pHypoBinds
 
-    pAtom = do
-      cat <- pCId
-      RP.skipSpaces
-      args <- RP.sepBy pArg RP.skipSpaces
-      return (cat, args)
+pHypoBinds = do
+   xs <- RP.option [(Explicit,wildCId)] $ do
+               xs <- pBinds
+               RP.skipSpaces
+               RP.char ':'
+               return xs
+   ty <- pType
+   return [(b,v,ty) | (b,v) <- xs]
+
+pAtom = do
+   cat <- pCId
+   RP.skipSpaces
+   args <- RP.sepBy pArg RP.skipSpaces
+   return (cat, args)
 
 ppType :: Int -> [CId] -> Type -> PP.Doc
 ppType d scope (DTyp hyps cat args)

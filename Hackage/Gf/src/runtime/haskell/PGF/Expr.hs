@@ -1,16 +1,17 @@
 module PGF.Expr(Tree, BindType(..), Expr(..), Literal(..), Patt(..), Equation(..),
                 readExpr, showExpr, pExpr, pBinds, ppExpr, ppPatt, pattScope,
 
+                mkAbs,    unAbs,
                 mkApp,    unApp,
                 mkStr,    unStr,
                 mkInt,    unInt,
                 mkDouble, unDouble,
-                mkMeta,   isMeta,
+                mkMeta,   unMeta,
 
                 normalForm,
 
                 -- needed in the typechecker
-                Value(..), Env, Sig, eval, apply, value2expr,
+                Value(..), Env, Sig, eval, apply, applyValue, value2expr,
 
                 MetaId,
 
@@ -24,7 +25,7 @@ import PGF.Type
 import Data.Char
 import Data.Maybe
 import Data.List as List
-import Data.Map as Map hiding (showTree, foldl, foldr)
+import qualified Data.Map as Map hiding (showTree)
 import Control.Monad
 import qualified Text.PrettyPrint as PP
 import qualified Text.ParserCombinators.ReadP as RP
@@ -96,6 +97,15 @@ showExpr vars = PP.render . ppExpr 0 vars
 instance Read Expr where
     readsPrec _ = RP.readP_to_S pExpr
 
+mkAbs :: BindType -> CId -> Expr -> Expr
+mkAbs = EAbs
+
+unAbs :: Expr -> Maybe (BindType, CId, Expr)
+unAbs (EAbs bt x e) = Just (bt,x,e)
+unAbs (ETyped e ty) = unAbs e
+unAbs (EImplArg e)  = unAbs e
+unAbs _             = Nothing
+
 -- | Constructs an expression by applying a function to a list of expressions
 mkApp :: CId -> [Expr] -> Expr
 mkApp f es = foldl EApp (EFun f) es
@@ -106,6 +116,8 @@ unApp = extract []
   where
     extract es (EFun f)     = Just (f,es)
     extract es (EApp e1 e2) = extract (e2:es) e1
+    extract es (ETyped e ty)= extract es e
+    extract es (EImplArg e) = extract es e
     extract es _            = Nothing
 
 -- | Constructs an expression from string literal
@@ -115,6 +127,8 @@ mkStr s = ELit (LStr s)
 -- | Decomposes an expression into string literal
 unStr :: Expr -> Maybe String
 unStr (ELit (LStr s)) = Just s
+unStr (ETyped e ty)   = unStr e
+unStr (EImplArg e)    = unStr e
 unStr _               = Nothing
 
 -- | Constructs an expression from integer literal
@@ -124,6 +138,8 @@ mkInt i = ELit (LInt i)
 -- | Decomposes an expression into integer literal
 unInt :: Expr -> Maybe Int
 unInt (ELit (LInt i)) = Just i
+unInt (ETyped e ty)   = unInt e
+unInt (EImplArg e)    = unInt e
 unInt _               = Nothing
 
 -- | Constructs an expression from real number literal
@@ -133,16 +149,20 @@ mkDouble f = ELit (LFlt f)
 -- | Decomposes an expression into real number literal
 unDouble :: Expr -> Maybe Double
 unDouble (ELit (LFlt f)) = Just f
+unDouble (ETyped e ty)   = unDouble e
+unDouble (EImplArg e)    = unDouble e
 unDouble _               = Nothing
 
 -- | Constructs an expression which is meta variable
-mkMeta :: Expr
-mkMeta = EMeta 0
+mkMeta :: Int -> Expr
+mkMeta i = EMeta i
 
 -- | Checks whether an expression is a meta variable
-isMeta :: Expr -> Bool
-isMeta (EMeta _) = True
-isMeta _         = False
+unMeta :: Expr -> Maybe Int
+unMeta (EMeta i)     = Just i
+unMeta (ETyped e ty) = unMeta e
+unMeta (EImplArg e)  = unMeta e
+unMeta _             = Nothing
 
 -----------------------------------------------------
 -- Parsing
@@ -181,8 +201,8 @@ pArg = fmap EImplArg (RP.between (RP.char '{') (RP.char '}') pExpr)
 pFactor =       fmap EFun  pCId
         RP.<++  fmap ELit  pLit
         RP.<++  fmap EMeta pMeta
-        RP.<++  RP.between (RP.char '(') (RP.char ')') pExpr
-        RP.<++  RP.between (RP.char '<') (RP.char '>') pTyped
+        RP.<++  RP.between (RP.char '(') (RP.skipSpaces >> RP.char ')') pExpr
+        RP.<++  RP.between (RP.char '<') (RP.skipSpaces >> RP.char '>') pTyped
 
 pTyped = do RP.skipSpaces
             e <- pExpr
@@ -285,7 +305,7 @@ value2expr sig i (VMeta j env vs)            = case snd sig j of
 value2expr sig i (VSusp j env vs k)          = value2expr sig i (k (VGen j vs))
 value2expr sig i (VConst f vs)               = foldl EApp (EFun f)       (List.map (value2expr sig i) vs)
 value2expr sig i (VLit l)                    = ELit l
-value2expr sig i (VClosure env (EAbs b x e)) = EAbs b x (value2expr sig (i+1) (eval sig ((VGen i []):env) e))
+value2expr sig i (VClosure env (EAbs b x e)) = EAbs b (mkCId ('v':show i)) (value2expr sig (i+1) (eval sig ((VGen i []):env) e))
 value2expr sig i (VImplArg v)                = EImplArg (value2expr sig i v)
 
 data Value
@@ -298,22 +318,22 @@ data Value
   | VClosure Env Expr
   | VImplArg Value
 
-type Sig = ( Map.Map CId (Type,Int,Maybe [Equation])    -- type and def of a fun
-           , Int -> Maybe Expr                          -- lookup for metavariables
+type Sig = ( Map.Map CId (Type,Int,Maybe [Equation],Double,Int) -- type and def of a fun
+           , Int -> Maybe Expr                                  -- lookup for metavariables
            )
 type Env = [Value]
 
 eval :: Sig -> Env -> Expr -> Value
 eval sig env (EVar i)     = env !! i
 eval sig env (EFun f)     = case Map.lookup f (fst sig) of
-                              Just (_,a,meqs) -> case meqs of
-                                                   Just eqs -> if a == 0
-                                                                 then case eqs of
-                                                                        Equ [] e : _ -> eval sig [] e
-                                                                        _            -> VConst f []
-                                                                 else VApp f []
-                                                   Nothing  -> VApp f []
-                              Nothing        -> error ("unknown function "++showCId f)
+                              Just (_,a,meqs,_,_) -> case meqs of
+                                                       Just eqs -> if a == 0
+                                                                     then case eqs of
+                                                                            Equ [] e : _ -> eval sig [] e
+                                                                            _            -> VConst f []
+                                                                     else VApp f []
+                                                       Nothing  -> VApp f []
+                              Nothing             -> error ("unknown function "++showCId f)
 eval sig env (EApp e1 e2) = apply sig env e1 [eval sig env e2]
 eval sig env (EAbs b x e) = VClosure env (EAbs b x e)
 eval sig env (EMeta i)    = case snd sig i of
@@ -327,14 +347,16 @@ apply :: Sig -> Env -> Expr -> [Value] -> Value
 apply sig env e            []     = eval sig env e
 apply sig env (EVar i)     vs     = applyValue sig (env !! i) vs
 apply sig env (EFun f)     vs     = case Map.lookup f (fst sig) of
-                                      Just (_,a,meqs) -> case meqs of
-                                                           Just eqs -> if a <= length vs
-                                                                         then match sig f eqs vs
-                                                                         else VApp f vs
-                                                           Nothing  -> VApp f vs
-                                      Nothing      -> error ("unknown function "++showCId f)
+                                      Just (_,a,meqs,_,_) -> case meqs of
+                                                               Just eqs -> if a <= length vs
+                                                                             then match sig f eqs vs
+                                                                             else VApp f vs
+                                                               Nothing  -> VApp f vs
+                                      Nothing           -> error ("unknown function "++showCId f)
 apply sig env (EApp e1 e2) vs     = apply sig env e1 (eval sig env e2 : vs)
-apply sig env (EAbs _ x e) (v:vs) = apply sig (v:env) e vs
+apply sig env (EAbs b x e) (v:vs) = case (b,v) of
+                                      (Implicit,VImplArg v) -> apply sig (v:env) e vs
+                                      (Explicit,         v) -> apply sig (v:env) e vs
 apply sig env (EMeta i)    vs     = case snd sig i of
                                       Just e  -> apply sig env e vs
                                       Nothing -> VMeta i env vs
@@ -349,7 +371,9 @@ applyValue sig (VMeta i env vs0)         vs       = VMeta i env (vs0++vs)
 applyValue sig (VGen  i vs0)             vs       = VGen  i (vs0++vs)
 applyValue sig (VSusp i env vs0 k)       vs       = VSusp i env vs0 (\v -> applyValue sig (k v) vs)
 applyValue sig (VConst f vs0)            vs       = VConst f (vs0++vs)
-applyValue sig (VClosure env (EAbs b x e)) (v:vs) = apply sig (v:env) e vs
+applyValue sig (VClosure env (EAbs b x e)) (v:vs) = case (b,v) of
+                                                      (Implicit,VImplArg v) -> apply sig (v:env) e vs
+                                                      (Explicit,         v) -> apply sig (v:env) e vs
 applyValue sig (VImplArg _)              vs       = error "implicit argument in function position"
 
 -----------------------------------------------------

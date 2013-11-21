@@ -6,6 +6,7 @@ module GF.Compile.ExampleBased (
 import PGF
 import PGF.Probabilistic
 import PGF.Morphology
+import GF.Compile.ToAPI
 
 import Data.List
 
@@ -41,22 +42,30 @@ convertFile conf src file = do
   convEx (cat,ex) = do
     appn "("
     let typ = maybe (error "no valid cat") id $ readType cat
-    let ts = rank $ parse pgf lang typ ex
-    ws <- case ts of
-      []   -> do
+    ws <- case fst (parse_ pgf lang typ (Just 4) ex) of
+      ParseFailed _ -> do
         let ws = morphoMissing morpho (words ex)
         appv ("WARNING: cannot parse example " ++ ex) 
         case ws of
           [] -> return ()
           _  -> appv ("  missing words: " ++ unwords ws)
-        return ws 
-      t:tt -> appv ("WARNING: ambiguous example " ++ ex) >>
-              appn t >> mapM_ (appn . ("  --- " ++)) tt >> return []
-    appn ")"
+        return ws
+      TypeError _ ->
+        return []
+      ParseIncomplete ->
+        return []
+      ParseOk ts ->
+        case rank ts of
+          (t:tt) -> do
+            if null tt 
+              then return ()
+              else appv ("WARNING: ambiguous example " ++ ex) 
+            appn t 
+            mapM_ (appn . ("  --- " ++)) tt
+            appn ")" 
+            return [] 
     return ws
-  rank ts = case probs conf of
-    Just probs -> [showExpr [] t ++ "  -- " ++ show p | (t,p) <- rankTreesByProbs probs ts]
-    _ -> map (showExpr []) ts
+  rank ts = [printExp conf t ++ "  -- " ++ show p | (t,p) <- rankTreesByProbs pgf ts]
   appf = appendFile file
   appn s = appf s >> appf "\n"
   appv s = appn ("--- " ++ s) >> putStrLn s
@@ -64,11 +73,11 @@ convertFile conf src file = do
 data ExConfiguration = ExConf {
   resource_pgf    :: PGF,
   resource_morpho :: Morpho,
-  probs    :: Maybe Probabilities,
   verbose  :: Bool,
-  language :: Language
+  language :: Language,
+  printExp :: Tree -> String
   }
 
-configureExBased :: PGF -> Morpho -> Maybe Probabilities -> Language -> ExConfiguration
-configureExBased pgf morpho mprobs lang = ExConf pgf morpho mprobs False lang
+configureExBased :: PGF -> Morpho -> Language -> (Tree -> String) -> ExConfiguration
+configureExBased pgf morpho lang pr = ExConf pgf morpho False lang pr
 

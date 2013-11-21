@@ -1,4 +1,3 @@
-{-# OPTIONS -cpp #-}
 module Main where
 
 import GFC
@@ -6,6 +5,7 @@ import GFI
 import GF.Data.ErrM
 import GF.Infra.Option
 import GF.Infra.UseIO
+import GF.Infra.BuildInfo (buildInfo)
 import Paths_gf
 
 import Data.Version
@@ -13,10 +13,7 @@ import System.Directory
 import System.Environment (getArgs)
 import System.Exit
 import System.IO
-#ifdef mingw32_HOST_OS
-import System.Win32.Console
-import System.Win32.NLS
-#endif
+import GF.System.Console (setConsoleEncoding)
 
 import Fibon.Run.BenchmarkHelper
 
@@ -25,15 +22,7 @@ main = fibonReplicateMain oldmain
 
 oldmain :: IO ()
 oldmain = do
-#ifdef mingw32_HOST_OS
-  codepage <- getACP
-  setConsoleCP codepage
-  setConsoleOutputCP codepage
-  enc <- mkTextEncoding ("CP"++show codepage)
-  hSetEncoding stdin  enc
-  hSetEncoding stdout enc
-  hSetEncoding stderr enc
-#endif
+  setConsoleEncoding
   args <- getArgs
   case parseOptions args of
     Ok (opts,files) -> do curr_dir <- getCurrentDirectory
@@ -46,9 +35,9 @@ oldmain = do
 mainOpts :: Options -> [FilePath] -> IO ()
 mainOpts opts files = 
     case flag optMode opts of
-      ModeVersion     -> putStrLn $ "Grammatical Framework (GF) version " ++ showVersion version
+      ModeVersion     -> putStrLn $ "Grammatical Framework (GF) version " ++ showVersion version ++ "\n" ++ buildInfo
       ModeHelp        -> putStrLn helpMessage
       ModeInteractive -> mainGFI opts files
       ModeRun         -> mainRunGFI opts files
-      ModeCompiler    -> dieIOE (mainGFC opts files)
-
+      ModeServer port -> mainServerGFI opts port files
+      ModeCompiler    -> mainGFC opts files

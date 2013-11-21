@@ -33,8 +33,8 @@ pgf2js pgf =
 abstract2js :: String -> Abstr -> JS.Expr
 abstract2js start ds = new "GFAbstract" [JS.EStr start, JS.EObj $ map absdef2js (Map.assocs (funs ds))]
 
-absdef2js :: (CId,(Type,Int,Maybe [Equation])) -> JS.Property
-absdef2js (f,(typ,_,_)) =
+absdef2js :: (CId,(Type,Int,Maybe [Equation],Double,BCAddr)) -> JS.Property
+absdef2js (f,(typ,_,_,_,_)) =
   let (args,cat) = M.catSkeleton typ in 
     JS.Prop (JS.IdentPropName (JS.Ident (showCId f))) (new "Type" [JS.EArray [JS.EStr (showCId x) | x <- args], JS.EStr (showCId cat)])
 
@@ -57,30 +57,6 @@ concrete2js (c,cnc) =
                JS.Prop (JS.StringPropName "String") (JS.EFun [children] [JS.SReturn $ new "Arr" [JS.EIndex (JS.EVar children) (JS.EInt 0)]])]
    cats (c,CncCat start end _) = JS.Prop (JS.IdentPropName (JS.Ident (showCId c))) (JS.EObj [JS.Prop (JS.IdentPropName (JS.Ident "s")) (JS.EInt start)
                                                                                             ,JS.Prop (JS.IdentPropName (JS.Ident "e")) (JS.EInt end)])
-
-cncdef2js :: String -> String -> (CId,Term) -> JS.Property
-cncdef2js n l (f, t) = JS.Prop (JS.IdentPropName (JS.Ident (showCId f))) (JS.EFun [children] [JS.SReturn (term2js n l t)])
-
-term2js :: String -> String -> Term -> JS.Expr
-term2js n l t = f t
-  where 
-  f t = 
-    case t of
-      R xs           -> new "Arr" (map f xs)
-      P x y          -> JS.ECall (JS.EMember (f x) (JS.Ident "sel")) [f y]
-      S xs           -> mkSeq (map f xs)
-      K t            -> tokn2js t
-      V i            -> JS.EIndex (JS.EVar children) (JS.EInt i)
-      C i            -> new "Int" [JS.EInt i]
-      F f            -> JS.ECall (JS.EMember (JS.EIndex (JS.EMember (JS.EVar $ JS.Ident n) (JS.Ident "concretes")) (JS.EStr l)) (JS.Ident "rule")) [JS.EStr (showCId f), JS.EVar children]
-      FV xs          -> new "Variants" (map f xs)
-      W str x        -> new "Suffix" [JS.EStr str, f x]
-      TM _           -> new "Meta" []
-
-tokn2js :: Tokn -> JS.Expr
-tokn2js (KS s) = mkStr s
-tokn2js (KP ss vs) = mkSeq (map mkStr ss) -- FIXME
-
 mkStr :: String -> JS.Expr
 mkStr s = new "Str" [JS.EStr s]
 
@@ -95,8 +71,10 @@ children :: JS.Ident
 children = JS.Ident "cs"
 
 frule2js :: Production -> JS.Expr
-frule2js (PApply funid args) = new "Rule"   [JS.EInt funid, JS.EArray (map JS.EInt args)]
+frule2js (PApply funid args) = new "Apply"  [JS.EInt funid, JS.EArray (map farg2js args)]
 frule2js (PCoerce arg)       = new "Coerce" [JS.EInt arg]
+
+farg2js (PArg hypos fid) = new "PArg" (map (JS.EInt . snd) hypos ++ [JS.EInt fid])
 
 ffun2js (CncFun f lins) = new "CncFun" [JS.EStr (showCId f), JS.EArray (map JS.EInt (Array.elems lins))]
 
@@ -104,10 +82,11 @@ seq2js :: Array.Array DotPos Symbol -> JS.Expr
 seq2js seq = JS.EArray [sym2js s | s <- Array.elems seq]
 
 sym2js :: Symbol -> JS.Expr
-sym2js (SymCat n l)    = new "Arg" [JS.EInt n, JS.EInt l]
-sym2js (SymLit n l)    = new "Lit" [JS.EInt n, JS.EInt l]
-sym2js (SymKS ts)      = new "KS"  (map JS.EStr ts)
-sym2js (SymKP ts alts) = new "KP"  [JS.EArray (map JS.EStr ts), JS.EArray (map alt2js alts)]
+sym2js (SymCat n l)    = new "SymCat" [JS.EInt n, JS.EInt l]
+sym2js (SymLit n l)    = new "SymLit" [JS.EInt n, JS.EInt l]
+sym2js (SymVar n l)    = new "SymVar" [JS.EInt n, JS.EInt l]
+sym2js (SymKS ts)      = new "SymKS"  (map JS.EStr ts)
+sym2js (SymKP ts alts) = new "SymKP"  [JS.EArray (map JS.EStr ts), JS.EArray (map alt2js alts)]
 
 alt2js (Alt ps ts) = new "Alt" [JS.EArray (map JS.EStr ps), JS.EArray (map JS.EStr ts)]
 

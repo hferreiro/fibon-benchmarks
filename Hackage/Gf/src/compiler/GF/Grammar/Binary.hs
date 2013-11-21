@@ -9,15 +9,25 @@
 
 module GF.Grammar.Binary where
 
+import Prelude hiding (catch)
+import Control.Exception(catch,ErrorCall(..),throwIO)
+
+import Data.Char
 import Data.Binary
+import Control.Monad
 import qualified Data.Map as Map
 import qualified Data.ByteString.Char8 as BS
 
 import GF.Data.Operations
 import GF.Infra.Ident
 import GF.Infra.Option
-import GF.Infra.Modules
 import GF.Grammar.Grammar
+
+import PGF.Binary
+
+-- Please change this every time when the GFO format is changed
+gfoVersion = "GF02"
+
 
 instance Binary Ident where
   put id = put (ident2bs id)
@@ -26,14 +36,14 @@ instance Binary Ident where
                 then return identW
                 else return (identC bs)
 
-instance Binary a => Binary (MGrammar a) where
-  put (MGrammar ms) = put ms
-  get               = fmap MGrammar get
+instance Binary SourceGrammar where
+  put = put . modules
+  get = fmap mGrammar get
 
-instance Binary a => Binary (ModInfo a) where
-  put mi = do put (mtype mi,mstatus mi,flags mi,extend mi,mwith mi,opens mi,mexdeps mi,jments mi)
-  get    = do (mtype,mstatus,flags,extend,mwith,opens,med,jments) <- get
-              return (ModInfo mtype mstatus flags extend mwith opens med jments)
+instance Binary SourceModInfo where
+  put mi = do put (mtype mi,mstatus mi,mflags mi,mextend mi,mwith mi,mopens mi,mexdeps mi,msrc mi,mseqs mi,jments mi)
+  get    = do (mtype,mstatus,mflags,mextend,mwith,mopens,med,msrc,mseqs,jments) <- get
+              return (ModInfo mtype mstatus mflags mextend mwith mopens med msrc mseqs jments)
 
 instance Binary ModuleType where
   put MTAbstract       = putWord8 0
@@ -86,41 +96,55 @@ instance Binary Options where
              Ok  x   -> return x
              Bad msg -> fail msg
 
+instance Binary Production where
+  put (Production res funid args) = put (res,funid,args)
+  get = do res   <- get
+           funid <- get
+           args  <- get
+           return (Production res funid args)
+
+instance Binary PMCFG where
+  put (PMCFG prods funs) = put (prods,funs)
+  get = do prods <- get
+           funs  <- get
+           return (PMCFG prods funs)
+
 instance Binary Info where
   put (AbsCat x)       = putWord8 0 >> put x
-  put (AbsFun x y z)   = putWord8 1 >> put (x,y,z)
+  put (AbsFun w x y z) = putWord8 1 >> put (w,x,y,z)
   put (ResParam x y)   = putWord8 2 >> put (x,y)
   put (ResValue x)     = putWord8 3 >> put x
   put (ResOper x y)    = putWord8 4 >> put (x,y)
   put (ResOverload x y)= putWord8 5 >> put (x,y)
-  put (CncCat x y z)   = putWord8 6 >> put (x,y,z)
-  put (CncFun x y z)   = putWord8 7 >> put (x,y,z)
+  put (CncCat w x y z) = putWord8 6 >> put (w,x,y,z)
+  put (CncFun w x y z) = putWord8 7 >> put (w,x,y,z)
   put (AnyInd x y)     = putWord8 8 >> put (x,y)
   get = do tag <- getWord8
            case tag of
-             0 -> get >>= \x       -> return (AbsCat x)
-             1 -> get >>= \(x,y,z) -> return (AbsFun x y z)
-             2 -> get >>= \(x,y)   -> return (ResParam x y)
-             3 -> get >>= \x       -> return (ResValue x)
-             4 -> get >>= \(x,y)   -> return (ResOper x y)
-             5 -> get >>= \(x,y)   -> return (ResOverload x y)
-             6 -> get >>= \(x,y,z) -> return (CncCat x y z)
-             7 -> get >>= \(x,y,z) -> return (CncFun x y z)
-             8 -> get >>= \(x,y)   -> return (AnyInd x y)
+             0 -> get >>= \x         -> return (AbsCat x)
+             1 -> get >>= \(w,x,y,z) -> return (AbsFun w x y z)
+             2 -> get >>= \(x,y)     -> return (ResParam x y)
+             3 -> get >>= \x         -> return (ResValue x)
+             4 -> get >>= \(x,y)     -> return (ResOper x y)
+             5 -> get >>= \(x,y)     -> return (ResOverload x y)
+             6 -> get >>= \(w,x,y,z) -> return (CncCat w x y z)
+             7 -> get >>= \(w,x,y,z) -> return (CncFun w x y z)
+             8 -> get >>= \(x,y)     -> return (AnyInd x y)
              _ -> decodingError
+
+instance Binary Location where
+  put NoLoc          = putWord8 0
+  put (Local x y)    = putWord8 1 >> put (x,y)
+  put (External x y) = putWord8 2 >> put (x,y)
+  get = do tag <- getWord8
+           case tag of
+             0 ->                   return NoLoc
+             1 -> get >>= \(x,y) -> return (Local x y)
+             2 -> get >>= \(x,y) -> return (External x y)
 
 instance Binary a => Binary (L a) where
   put (L x y) = put (x,y)
   get = get >>= \(x,y) -> return (L x y)
-
-instance Binary BindType where
-  put Explicit = putWord8 0
-  put Implicit = putWord8 1
-  get = do tag <- getWord8
-           case tag of
-             0 -> return Explicit
-             1 -> return Implicit
-             _ -> decodingError
 
 instance Binary Term where
   put (Vr x)        = putWord8 0  >> put x
@@ -134,28 +158,31 @@ instance Binary Term where
   put (App x y)     = putWord8 8  >> put (x,y)
   put (Abs x y z)   = putWord8 9 >> put (x,y,z)
   put (Meta x)      = putWord8 10 >> put x
-  put (Prod w x y z)= putWord8 11 >> put (w,x,y,z)
-  put (Typed x y)   = putWord8 12 >> put (x,y)
-  put (Example x y) = putWord8 13 >> put (x,y)
-  put (RecType x)   = putWord8 14 >> put x
-  put (R x)         = putWord8 15 >> put x
-  put (P x y)       = putWord8 16 >> put (x,y)
-  put (ExtR x y)    = putWord8 17 >> put (x,y)
-  put (Table x y)   = putWord8 18 >> put (x,y)
-  put (T x y)       = putWord8 19 >> put (x,y)
-  put (V x y)       = putWord8 20 >> put (x,y)
-  put (S x y)       = putWord8 21 >> put (x,y)
-  put (Let x y)     = putWord8 22 >> put (x,y)
-  put (Q  x y)      = putWord8 23 >> put (x,y)
-  put (QC x y)      = putWord8 24 >> put (x,y)
-  put (C x y)       = putWord8 25 >> put (x,y)
-  put (Glue x y)    = putWord8 26 >> put (x,y)
-  put (EPatt x)     = putWord8 27 >> put x
-  put (EPattType x) = putWord8 28 >> put x
-  put (FV x)        = putWord8 29 >> put x
-  put (Alts x)      = putWord8 30 >> put x
-  put (Strs x)      = putWord8 31 >> put x
-  put (ELin x y)    = putWord8 32 >> put (x,y)
+  put (ImplArg x)   = putWord8 11 >> put x
+  put (Prod w x y z)= putWord8 12 >> put (w,x,y,z)
+  put (Typed x y)   = putWord8 13 >> put (x,y)
+  put (Example x y) = putWord8 14 >> put (x,y)
+  put (RecType x)   = putWord8 15 >> put x
+  put (R x)         = putWord8 16 >> put x
+  put (P x y)       = putWord8 17 >> put (x,y)
+  put (ExtR x y)    = putWord8 18 >> put (x,y)
+  put (Table x y)   = putWord8 19 >> put (x,y)
+  put (T x y)       = putWord8 20 >> put (x,y)
+  put (V x y)       = putWord8 21 >> put (x,y)
+  put (S x y)       = putWord8 22 >> put (x,y)
+  put (Let x y)     = putWord8 23 >> put (x,y)
+  put (Q x)         = putWord8 24 >> put x
+  put (QC x)        = putWord8 25 >> put x
+  put (C x y)       = putWord8 26 >> put (x,y)
+  put (Glue x y)    = putWord8 27 >> put (x,y)
+  put (EPatt x)     = putWord8 28 >> put x
+  put (EPattType x) = putWord8 29 >> put x
+  put (ELincat x y) = putWord8 30 >> put (x,y)
+  put (ELin x y)    = putWord8 31 >> put (x,y)
+  put (FV x)        = putWord8 32 >> put x
+  put (Alts x y)    = putWord8 33 >> put (x,y)
+  put (Strs x)      = putWord8 34 >> put x
+  put (Error x)     = putWord8 35 >> put x
 
   get = do tag <- getWord8
            case tag of
@@ -170,33 +197,36 @@ instance Binary Term where
              8  -> get >>= \(x,y)   -> return (App x y)
              9  -> get >>= \(x,y,z) -> return (Abs x y z)
              10 -> get >>= \x       -> return (Meta x)
-             11 -> get >>= \(w,x,y,z)->return (Prod w x y z)
-             12 -> get >>= \(x,y)   -> return (Typed x y)
-             13 -> get >>= \(x,y)   -> return (Example x y)
-             14 -> get >>= \x       -> return (RecType x)
-             15 -> get >>= \x       -> return (R x)
-             16 -> get >>= \(x,y)   -> return (P x y)
-             17 -> get >>= \(x,y)   -> return (ExtR x y)
-             18 -> get >>= \(x,y)   -> return (Table x y)
-             19 -> get >>= \(x,y)   -> return (T x y)
-             20 -> get >>= \(x,y)   -> return (V x y)
-             21 -> get >>= \(x,y)   -> return (S x y)
-             22 -> get >>= \(x,y)   -> return (Let x y)
-             23 -> get >>= \(x,y)   -> return (Q  x y)
-             24 -> get >>= \(x,y)   -> return (QC x y)
-             25 -> get >>= \(x,y)   -> return (C x y)
-             26 -> get >>= \(x,y)   -> return (Glue x y)
-             27 -> get >>= \x       -> return (EPatt x)
-             28 -> get >>= \x       -> return (EPattType x)
-             29 -> get >>= \x       -> return (FV x)
-             30 -> get >>= \x       -> return (Alts x)
-             31 -> get >>= \x       -> return (Strs x)
-             32 -> get >>= \(x,y)   -> return (ELin x y)
+             11 -> get >>= \x       -> return (ImplArg x)
+             12 -> get >>= \(w,x,y,z)->return (Prod w x y z)
+             13 -> get >>= \(x,y)   -> return (Typed x y)
+             14 -> get >>= \(x,y)   -> return (Example x y)
+             15 -> get >>= \x       -> return (RecType x)
+             16 -> get >>= \x       -> return (R x)
+             17 -> get >>= \(x,y)   -> return (P x y)
+             18 -> get >>= \(x,y)   -> return (ExtR x y)
+             19 -> get >>= \(x,y)   -> return (Table x y)
+             20 -> get >>= \(x,y)   -> return (T x y)
+             21 -> get >>= \(x,y)   -> return (V x y)
+             22 -> get >>= \(x,y)   -> return (S x y)
+             23 -> get >>= \(x,y)   -> return (Let x y)
+             24 -> get >>= \x       -> return (Q  x)
+             25 -> get >>= \x       -> return (QC x)
+             26 -> get >>= \(x,y)   -> return (C x y)
+             27 -> get >>= \(x,y)   -> return (Glue x y)
+             28 -> get >>= \x       -> return (EPatt x)
+             29 -> get >>= \x       -> return (EPattType x)
+             30 -> get >>= \(x,y)   -> return (ELincat x y)
+             31 -> get >>= \(x,y)   -> return (ELin x y)
+             32 -> get >>= \x       -> return (FV x)
+             33 -> get >>= \(x,y)   -> return (Alts x y)
+             34 -> get >>= \x       -> return (Strs x)
+             35 -> get >>= \x       -> return (Error x)
              _  -> decodingError
 
 instance Binary Patt where
   put (PC x y)     = putWord8  0 >> put (x,y)
-  put (PP x y z)   = putWord8  1 >> put (x,y,z)
+  put (PP x y)     = putWord8  1 >> put (x,y)
   put (PV x)       = putWord8  2 >> put x
   put (PW)         = putWord8  3
   put (PR x)       = putWord8  4 >> put x
@@ -212,12 +242,12 @@ instance Binary Patt where
   put (PChar)      = putWord8 15
   put (PChars x)   = putWord8 16 >> put x
   put (PMacro x)   = putWord8 17 >> put x
-  put (PM x y)     = putWord8 18 >> put (x,y)
+  put (PM x)       = putWord8 18 >> put x
   put (PTilde x)   = putWord8 19 >> put x
   get = do tag <- getWord8
            case tag of
              0  -> get >>= \(x,y)   -> return (PC x y)
-             1  -> get >>= \(x,y,z) -> return (PP x y z)
+             1  -> get >>= \(x,y)   -> return (PP x y)
              2  -> get >>= \x       -> return (PV x)
              3  ->                     return (PW)
              4  -> get >>= \x       -> return (PR x)
@@ -233,7 +263,7 @@ instance Binary Patt where
              15 ->                     return (PChar)
              16 -> get >>= \x       -> return (PChars x)
              17 -> get >>= \x       -> return (PMacro x)
-             18 -> get >>= \(x,y)   -> return (PM x y)
+             18 -> get >>= \x       -> return (PM x)
              19 -> get >>= \x       -> return (PTilde x)
              _  -> decodingError
 
@@ -259,9 +289,31 @@ instance Binary Label where
              1 -> fmap LVar   get
              _ -> decodingError
 
-decodeModHeader :: FilePath -> IO SourceModule
-decodeModHeader fpath = do
-  (m,mtype,mstatus,flags,extend,mwith,opens,med) <- decodeFile fpath
-  return (m,ModInfo mtype mstatus flags extend mwith opens med Map.empty)
 
-decodingError = fail "This GFO file was compiled with different version of GF"
+putGFOVersion = mapM_ (putWord8 . fromIntegral . ord) gfoVersion
+getGFOVersion = replicateM (length gfoVersion) (fmap (chr . fromIntegral) getWord8)
+
+decodeModule :: FilePath -> IO SourceModule
+decodeModule fpath = decodeFile' fpath (getGFOVersion >> get)
+
+decodeModuleHeader fpath = decodeFile' fpath getVersionedMod
+  where
+    getVersionedMod = do
+      ver <- getGFOVersion
+      if ver == gfoVersion
+        then do (m,mtype,mstatus,mflags,mextend,mwith,mopens,med,msrc) <- get
+                return (Just (m,ModInfo mtype mstatus mflags mextend mwith mopens med msrc Nothing Map.empty))
+        else return Nothing
+
+encodeModule :: FilePath -> SourceModule -> IO ()
+encodeModule fpath mo =
+  encodeFile_ fpath (putGFOVersion >> put mo)
+
+-- | like decodeFile_ but adds file name to error message if there was an error
+decodeFile' fpath get = addFPath fpath (decodeFile_ fpath get)
+
+-- | Adds file name to error message if there was an error,
+-- | but laziness can cause errors to slip through
+addFPath fpath m = m `catch` handle
+  where
+    handle (ErrorCall msg) = throwIO (ErrorCall (fpath++": "++msg))

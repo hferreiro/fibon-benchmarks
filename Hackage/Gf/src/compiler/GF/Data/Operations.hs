@@ -15,7 +15,7 @@
 -----------------------------------------------------------------------------
 
 module GF.Data.Operations (-- * misc functions
-		   ifNull, onSnd,
+		   ifNull,
 
 		   -- * the Error monad
 		   Err(..), err, maybeErr, testErr, errVal, errIn, 
@@ -43,7 +43,7 @@ module GF.Data.Operations (-- * misc functions
 		   combinations,
 
 		   -- * topological sorting with test of cyclicity
-		   topoTest, 
+		   topoTest, topoTest2,
 
 		   -- * the generic fix point iterator
 		   iterFix,
@@ -60,7 +60,7 @@ module GF.Data.Operations (-- * misc functions
 		  ) where
 
 import Data.Char (isSpace, toUpper, isSpace, isDigit)
-import Data.List (nub, sortBy, sort, deleteBy, nubBy)
+import Data.List (nub, sortBy, sort, deleteBy, nubBy, partition, (\\))
 import qualified Data.Map as Map
 import Data.Map (Map)
 import Control.Monad (liftM,liftM2, MonadPlus, mzero, mplus)
@@ -75,9 +75,6 @@ infixr 5 +++++
 
 ifNull :: b -> ([a] -> b) -> [a] -> b
 ifNull b f xs = if null xs then b else f xs
-
-onSnd :: (a -> b) -> (c,a) -> (c,b)
-onSnd f (x, y) = (x, f y)
 
 -- the Error monad
 
@@ -266,6 +263,22 @@ combinations t = case t of
 -- | topological sorting with test of cyclicity
 topoTest :: Ord a => [(a,[a])] -> Either [a] [[a]]
 topoTest = topologicalSort . mkRel'
+
+-- | topological sorting with test of cyclicity, new version /TH 2012-06-26
+topoTest2 :: Ord a => [(a,[a])] -> Either [[a]] [[a]]
+topoTest2 g0 = maybe (Right cycles) Left (tsort g)
+  where
+    g = g0++[(n,[])|n<-nub (concatMap snd g0)\\map fst g0]
+
+    cycles = findCycles (mkRel' g)
+
+    tsort nes =
+      case partition (null.snd) nes of
+        ([],[]) -> Just []
+        ([],_) -> Nothing
+        (ns,rest) -> (leaves:) `fmap` tsort [(n,es \\ leaves) | (n,es)<-rest]
+	  where leaves = map fst ns
+
 
 -- | the generic fix point iterator
 iterFix :: Eq a => ([a] -> [a]) -> [a] -> [a]
