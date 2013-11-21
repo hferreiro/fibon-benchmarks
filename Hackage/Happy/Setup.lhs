@@ -4,50 +4,71 @@
 module Main where
 
 import Distribution.PackageDescription (PackageDescription(..))
-import Distribution.Simple.Setup ( BuildFlags(..), buildVerbose )
-import Distribution.Simple ( defaultMainWithHooks, defaultUserHooks, UserHooks(..) )
+import Distribution.Simple.Setup ( BuildFlags(..), buildVerbosity, fromFlagOrDefault )
+import Distribution.Simple ( defaultMainWithHooks, simpleUserHooks, UserHooks(..) )
 import Distribution.Simple.LocalBuildInfo ( LocalBuildInfo(..) )
 import Distribution.Simple.Program
+import Distribution.Verbosity ( normal )
 
+import Data.Monoid ((<>))
 import System.FilePath ((</>))
-import System.IO.Error ( try )
+import Control.Exception ( try )
 import System.Directory (removeFile)
 
 main :: IO ()
-main = defaultMainWithHooks defaultUserHooks{ hookedPrograms = [perlProgram],
-					      postBuild = myPostBuild,
+main = defaultMainWithHooks simpleUserHooks { postBuild = myPostBuild,
 					      postClean = myPostClean,
 					      copyHook  = myCopy,
 					      instHook  = myInstall }
 
-perlProgram = simpleProgram "perl"
 happyBuildDir lbi = (buildDir lbi) </> "Happy"
 
 -- hack to turn cpp-style '# 27 "GenericTemplate.hs"' into 
 -- '{-# LINE 27 "GenericTemplate.hs" #-}'.
-crazy_perl_regexp =
- "s/^#\\s+(\\d+)\\s+(\"[^\"]*\")/{-# LINE \\1 \\2 #-}/g;s/\\$(Id:.*)\\$/\\1/g"
+mungeLinePragma line = case symbols line of
+ ["#", number, string] | length string >= 2
+                      && head string == '"'
+                      && last string == '"'
+   -> case reads number of
+        [(n, "")] -> "{-# LINE " ++ show (n :: Int) ++ " " ++ string ++ " #-}"
+        _         -> line
+ -- Also convert old-style CVS lines, no idea why we do this...
+ ("--":"$":"Id":":":_) -> filter (/='$') line
+ (     "$":"Id":":":_) -> filter (/='$') line
+ _ -> line
+
+symbols :: String -> [String]
+symbols cs = case lex cs of
+              (sym, cs'):_ | not (null sym) -> sym : symbols cs'
+              _ -> []
 
 myPostBuild _ flags _ lbi = do
-  let runProgram p = rawSystemProgramConf (buildVerbose flags) p (withPrograms lbi)
-      cpp_template src dst opts = do
-        runProgram ghcProgram (["-o",  (happyBuildDir lbi) </> dst, "-E", "-cpp", "templates" </> src] ++ opts)
-	runProgram perlProgram ["-i.bak", "-pe", crazy_perl_regexp, (happyBuildDir lbi) </> dst]
+  let runProgram p = rawSystemProgramConf (fromFlagOrDefault normal (buildVerbosity flags))
+                                          p
+                                          (withPrograms lbi)
+      cpp_template src dst' opts = do
+        let tmp = dst ++ ".tmp"
+            dst = (happyBuildDir lbi) </> dst'
+        runProgram ghcProgram (["-o", tmp, "-E", "-cpp", "templates" </> src] ++ opts)
+        writeFile dst . unlines . map mungeLinePragma . lines =<< readFile tmp
+        removeFile tmp
 
   sequence_ ([ cpp_template "GenericTemplate.hs" dst opts | (dst,opts) <- templates ] ++
              [ cpp_template "GLR_Base.hs"       dst opts | (dst,opts) <- glr_base_templates ] ++
              [ cpp_template "GLR_Lib.hs"        dst opts | (dst,opts) <- glr_templates ])
 
-myPostClean _ _ _ _ = mapM_ (try . removeFile) all_template_files
+myPostClean _ _ _ _ = mapM_ (try' . removeFile) all_template_files
+  where try' :: IO a -> IO (Either IOError a)
+        try' = try
 
 myInstall pkg_descr lbi hooks flags =
-  instHook defaultUserHooks pkg_descr' lbi hooks flags
+  instHook simpleUserHooks pkg_descr' lbi hooks flags
   where pkg_descr' = pkg_descr {
           dataFiles = dataFiles pkg_descr ++ all_template_files
 	}
 
 myCopy pkg_descr lbi hooks copy_flags =
-  copyHook defaultUserHooks pkg_descr' lbi hooks copy_flags
+  copyHook simpleUserHooks pkg_descr' lbi hooks copy_flags
   where pkg_descr' = pkg_descr {
           dataFiles = dataFiles pkg_descr ++ all_template_files
 	}

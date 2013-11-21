@@ -1,13 +1,29 @@
 -- $Id: GenericTemplate.hs,v 1.26 2005/01/14 14:47:22 simonmar Exp $
 
 #ifdef HAPPY_GHC
+#undef __GLASGOW_HASKELL__
+#define HAPPY_IF_GHC_GT_500 #if __GLASGOW_HASKELL__ > 500
+#define HAPPY_IF_GHC_GE_503 #if __GLASGOW_HASKELL__ >= 503
+#define HAPPY_ELIF_GHC_500 #elif __GLASGOW_HASKELL__ == 500
+#define HAPPY_IF_GHC_GT_706 #if __GLASGOW_HASKELL__ > 706
+#define HAPPY_ELSE #else
+#define HAPPY_ENDIF #endif
+#define HAPPY_DEFINE #define
+#endif
+
+#ifdef HAPPY_GHC
 #define ILIT(n) n#
-#define FAST_INT_BINDING(n) (n)
 #define IBOX(n) (Happy_GHC_Exts.I# (n))
 #define FAST_INT Happy_GHC_Exts.Int#
-#define LT(n,m) (n Happy_GHC_Exts.<# m)
-#define GTE(n,m) (n Happy_GHC_Exts.>=# m)
-#define EQ(n,m) (n Happy_GHC_Exts.==# m)
+HAPPY_IF_GHC_GT_706
+HAPPY_DEFINE LT(n,m) ((Happy_GHC_Exts.tagToEnum# (n Happy_GHC_Exts.<# m)) :: Bool)
+HAPPY_DEFINE GTE(n,m) ((Happy_GHC_Exts.tagToEnum# (n Happy_GHC_Exts.>=# m)) :: Bool)
+HAPPY_DEFINE EQ(n,m) ((Happy_GHC_Exts.tagToEnum# (n Happy_GHC_Exts.==# m)) :: Bool)
+HAPPY_ELSE
+HAPPY_DEFINE LT(n,m) (n Happy_GHC_Exts.<# m)
+HAPPY_DEFINE GTE(n,m) (n Happy_GHC_Exts.>=# m)
+HAPPY_DEFINE EQ(n,m) (n Happy_GHC_Exts.==# m)
+HAPPY_ENDIF
 #define PLUS(n,m) (n Happy_GHC_Exts.+# m)
 #define MINUS(n,m) (n Happy_GHC_Exts.-# m)
 #define TIMES(n,m) (n Happy_GHC_Exts.*# m)
@@ -15,7 +31,6 @@
 #define IF_GHC(x) (x)
 #else
 #define ILIT(n) (n)
-#define FAST_INT_BINDING(n) (n)
 #define IBOX(n) (n)
 #define FAST_INT Int
 #define LT(n,m) (n < m)
@@ -52,11 +67,11 @@ data Happy_IntList = HappyCons FAST_INT Happy_IntList
 #if defined(HAPPY_COERCE)
 #define GET_ERROR_TOKEN(x)  (case Happy_GHC_Exts.unsafeCoerce# x of { IBOX(i) -> i })
 #define MK_ERROR_TOKEN(i)   (Happy_GHC_Exts.unsafeCoerce# IBOX(i))
-#define MK_TOKEN(x)	    (happyInTok (x))
+#define MK_TOKEN(x)         (happyInTok (x))
 #else
 #define GET_ERROR_TOKEN(x)  (case x of { HappyErrorToken IBOX(i) -> i })
 #define MK_ERROR_TOKEN(i)   (HappyErrorToken IBOX(i))
-#define MK_TOKEN(x)	    (HappyTerminal (x))
+#define MK_TOKEN(x)         (HappyTerminal (x))
 #endif
 
 #if defined(HAPPY_DEBUG)
@@ -83,9 +98,9 @@ happyParse start_state = happyNewToken start_state notHappyAtAll notHappyAtAll
 -- parse (a %partial parser).  We must ignore the saved token on the top of
 -- the stack in this case.
 happyAccept ERROR_TOK tk st sts (_ `HappyStk` ans `HappyStk` _) =
-	happyReturn1 ans
+        happyReturn1 ans
 happyAccept j tk st sts (HappyStk ans _) = 
-	IF_GHC(happyTcHack j IF_ARRAYS(happyTcHack st)) (happyReturn1 ans)
+        IF_GHC(happyTcHack j IF_ARRAYS(happyTcHack st)) (happyReturn1 ans)
 
 -----------------------------------------------------------------------------
 -- Arrays only: do the next action
@@ -93,44 +108,35 @@ happyAccept j tk st sts (HappyStk ans _) =
 #if defined(HAPPY_ARRAY)
 
 happyDoAction i tk st
-	= DEBUG_TRACE("state: " ++ show IBOX(st) ++ 
-		      ",\ttoken: " ++ show IBOX(i) ++
-		      ",\taction: ")
-	  case action of
-		ILIT(0)		  -> DEBUG_TRACE("fail.\n")
-				     happyFail i tk st
-		ILIT(-1) 	  -> DEBUG_TRACE("accept.\n")
-				     happyAccept i tk st
-		n | LT(n,(ILIT(0) :: FAST_INT)) -> DEBUG_TRACE("reduce (rule " ++ show rule
-						 ++ ")")
-				     (happyReduceArr Happy_Data_Array.! rule) i tk st
-				     where rule = IBOX(NEGATE(PLUS(n,(ILIT(1) :: FAST_INT))))
-		n		  -> DEBUG_TRACE("shift, enter state "
-						 ++ show IBOX(new_state)
-						 ++ "\n")
-				     happyShift new_state i tk st
-				     where FAST_INT_BINDING(new_state) = MINUS(n,(ILIT(1) :: FAST_INT))
-   where FAST_INT_BINDING(off)    = indexShortOffAddr happyActOffsets st
-         FAST_INT_BINDING(off_i)  = PLUS(off,i)
-	 check  = if GTE(off_i,(ILIT(0) :: FAST_INT))
-			then EQ(indexShortOffAddr happyCheck off_i, i)
-			else False
-         FAST_INT_BINDING(action)
+        = DEBUG_TRACE("state: " ++ show IBOX(st) ++ 
+                      ",\ttoken: " ++ show IBOX(i) ++
+                      ",\taction: ")
+          case action of
+                ILIT(0)           -> DEBUG_TRACE("fail.\n")
+                                     happyFail i tk st
+                ILIT(-1)          -> DEBUG_TRACE("accept.\n")
+                                     happyAccept i tk st
+                n | LT(n,(ILIT(0) :: FAST_INT)) -> DEBUG_TRACE("reduce (rule " ++ show rule
+                                                               ++ ")")
+                                                   (happyReduceArr Happy_Data_Array.! rule) i tk st
+                                                   where rule = IBOX(NEGATE(PLUS(n,(ILIT(1) :: FAST_INT))))
+                n                 -> DEBUG_TRACE("shift, enter state "
+                                                 ++ show IBOX(new_state)
+                                                 ++ "\n")
+                                     happyShift new_state i tk st
+                                     where new_state = MINUS(n,(ILIT(1) :: FAST_INT))
+   where off    = indexShortOffAddr happyActOffsets st
+         off_i  = PLUS(off,i)
+         check  = if GTE(off_i,(ILIT(0) :: FAST_INT))
+                  then EQ(indexShortOffAddr happyCheck off_i, i)
+                  else False
+         action
           | check     = indexShortOffAddr happyTable off_i
           | otherwise = indexShortOffAddr happyDefActions st
 
 #ifdef HAPPY_GHC
-#undef __GLASGOW_HASKELL__
-#define HAPPY_IF_GHC_GT_500 #if __GLASGOW_HASKELL__ > 500
-#define HAPPY_IF_GHC_GE_503 #if __GLASGOW_HASKELL__ >= 503
-#define HAPPY_ELIF_GHC_500 #elif __GLASGOW_HASKELL__ == 500
-#define HAPPY_ELSE #else
-#define HAPPY_ENDIF #endif
-#endif
-
-#ifdef HAPPY_GHC
 indexShortOffAddr (HappyA# arr) off =
-	Happy_GHC_Exts.narrow16Int# i
+        Happy_GHC_Exts.narrow16Int# i
   where
         i = Happy_GHC_Exts.word2Int# (Happy_GHC_Exts.or# (Happy_GHC_Exts.uncheckedShiftL# high 8#) low)
         high = Happy_GHC_Exts.int2Word# (Happy_GHC_Exts.ord# (Happy_GHC_Exts.indexCharOffAddr# arr (off' Happy_GHC_Exts.+# 1#)))
@@ -165,7 +171,7 @@ newtype HappyState b c = HappyState
 -- Shifting a token
 
 happyShift new_state ERROR_TOK tk st sts stk@(x `HappyStk` _) =
-     let FAST_INT_BINDING(i) = GET_ERROR_TOKEN(x) in
+     let i = GET_ERROR_TOKEN(x) in
 --     trace "shifting the error token" $
      DO_ACTION(new_state,i,tk,CONS(st,sts),stk)
 
@@ -201,30 +207,33 @@ happyReduce k i fn ERROR_TOK tk st sts stk
      = happyFail ERROR_TOK tk st sts stk
 happyReduce k nt fn j tk st sts stk
      = case happyDrop MINUS(k,(ILIT(1) :: FAST_INT)) sts of
-	 sts1@(CONS(st1@HAPPYSTATE(action),_)) ->
-        	let r = fn stk in  -- it doesn't hurt to always seq here...
-       		happyDoSeq r (GOTO(action) nt j tk st1 sts1 r)
+         sts1@(CONS(st1@HAPPYSTATE(action),_)) ->
+                let r = fn stk in  -- it doesn't hurt to always seq here...
+                happyDoSeq r (GOTO(action) nt j tk st1 sts1 r)
 
 happyMonadReduce k nt fn ERROR_TOK tk st sts stk
      = happyFail ERROR_TOK tk st sts stk
 happyMonadReduce k nt fn j tk st sts stk =
-        happyThen1 (fn stk tk) (\r -> GOTO(action) nt j tk st1 sts1 (r `HappyStk` drop_stk))
-       where FAST_INT_BINDING(sts1@(CONS(st1@HAPPYSTATE(action),_))) = happyDrop k CONS(st,sts)
-             drop_stk = happyDropStk k stk
+      case happyDrop k CONS(st,sts) of
+        sts1@(CONS(st1@HAPPYSTATE(action),_)) ->
+          let drop_stk = happyDropStk k stk in
+          happyThen1 (fn stk tk) (\r -> GOTO(action) nt j tk st1 sts1 (r `HappyStk` drop_stk))
 
 happyMonad2Reduce k nt fn ERROR_TOK tk st sts stk
      = happyFail ERROR_TOK tk st sts stk
 happyMonad2Reduce k nt fn j tk st sts stk =
-       happyThen1 (fn stk tk) (\r -> happyNewToken new_state sts1 (r `HappyStk` drop_stk))
-       where FAST_INT_BINDING(sts1@(CONS(st1@HAPPYSTATE(action),_))) = happyDrop k CONS(st,sts)
-             drop_stk = happyDropStk k stk
+      case happyDrop k CONS(st,sts) of
+        sts1@(CONS(st1@HAPPYSTATE(action),_)) ->
+         let drop_stk = happyDropStk k stk
 #if defined(HAPPY_ARRAY)
-             FAST_INT_BINDING(off) = indexShortOffAddr happyGotoOffsets st1
-             FAST_INT_BINDING(off_i) = PLUS(off,nt)
-             FAST_INT_BINDING(new_state) = indexShortOffAddr happyTable off_i
+             off = indexShortOffAddr happyGotoOffsets st1
+             off_i = PLUS(off,nt)
+             new_state = indexShortOffAddr happyTable off_i
 #else
              new_state = action
 #endif
+          in
+          happyThen1 (fn stk tk) (\r -> happyNewToken new_state sts1 (r `HappyStk` drop_stk))
 
 happyDrop ILIT(0) l = l
 happyDrop n CONS(_,t) = happyDrop MINUS(n,(ILIT(1) :: FAST_INT)) t
@@ -239,9 +248,9 @@ happyDropStk n (x `HappyStk` xs) = happyDropStk MINUS(n,(ILIT(1)::FAST_INT)) xs
 happyGoto nt j tk st = 
    DEBUG_TRACE(", goto state " ++ show IBOX(new_state) ++ "\n")
    happyDoAction j tk new_state
-   where FAST_INT_BINDING(off) = indexShortOffAddr happyGotoOffsets st
-         FAST_INT_BINDING(off_i) = PLUS(off,nt)
-         FAST_INT_BINDING(new_state) = indexShortOffAddr happyTable off_i
+   where off = indexShortOffAddr happyGotoOffsets st
+         off_i = PLUS(off,nt)
+         new_state = indexShortOffAddr happyTable off_i
 #else
 happyGoto action j tk st = action j j tk (HappyState action)
 #endif
@@ -250,9 +259,10 @@ happyGoto action j tk st = action j j tk (HappyState action)
 -- Error recovery (ERROR_TOK is the error token)
 
 -- parse error if we are in recovery and we fail again
-happyFail  ERROR_TOK tk old_st _ stk =
---	trace "failing" $ 
-    	happyError_ tk
+happyFail ERROR_TOK tk old_st _ stk@(x `HappyStk` _) =
+     let i = GET_ERROR_TOKEN(x) in
+--      trace "failing" $ 
+        happyError_ i tk
 
 {-  We don't need state discarding for our restricted implementation of
     "error".  In fact, it can cause some bogus parses, so I've disabled it
@@ -260,16 +270,16 @@ happyFail  ERROR_TOK tk old_st _ stk =
 
 -- discard a state
 happyFail  ERROR_TOK tk old_st CONS(HAPPYSTATE(action),sts) 
-						(saved_tok `HappyStk` _ `HappyStk` stk) =
---	trace ("discarding state, depth " ++ show (length stk))  $
-	DO_ACTION(action,ERROR_TOK,tk,sts,(saved_tok`HappyStk`stk))
+                                                (saved_tok `HappyStk` _ `HappyStk` stk) =
+--      trace ("discarding state, depth " ++ show (length stk))  $
+        DO_ACTION(action,ERROR_TOK,tk,sts,(saved_tok`HappyStk`stk))
 -}
 
 -- Enter error recovery: generate an error token,
 --                       save the old token and carry on.
 happyFail  i tk HAPPYSTATE(action) sts stk =
 --      trace "entering error recovery" $
-	DO_ACTION(action,ERROR_TOK,tk,sts, MK_ERROR_TOKEN(i) `HappyStk` stk)
+        DO_ACTION(action,ERROR_TOK,tk,sts, MK_ERROR_TOKEN(i) `HappyStk` stk)
 
 -- Internal happy errors:
 
@@ -287,9 +297,9 @@ happyTcHack x y = y
 
 -----------------------------------------------------------------------------
 -- Seq-ing.  If the --strict flag is given, then Happy emits 
---	happySeq = happyDoSeq
+--      happySeq = happyDoSeq
 -- otherwise it emits
--- 	happySeq = happyDontSeq
+--      happySeq = happyDontSeq
 
 happyDoSeq, happyDontSeq :: a -> b -> b
 happyDoSeq   a b = a `seq` b

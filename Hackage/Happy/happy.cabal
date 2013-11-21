@@ -1,23 +1,23 @@
 name: happy
-version: 1.18.6
+version: 1.19.1
 license: BSD3
 license-file: LICENSE
 copyright: (c) Andy Gill, Simon Marlow
 author: Andy Gill and Simon Marlow
 maintainer: Simon Marlow <marlowsd@gmail.com>
-bug-reports: mailto:marlowsd@gmail.com
+bug-reports: https://github.com/simonmar/happy/issues
 stability: stable
 homepage: http://www.haskell.org/happy/
 synopsis: Happy is a parser generator for Haskell
 category: Development
-cabal-version: >= 1.2.3
-
--- Later, this isn't compatible with Cabal 1.2:
--- source-repository head
---   type:     darcs
---   location: http://darcs.haskell.org/happy/
-
+cabal-version: >= 1.8
 build-type: Custom
+
+Description:
+  Happy is a parser generator for Haskell.  Given a grammar
+  specification in BNF, Happy generates Haskell code to parse the
+  grammar.  Happy works in a similar way to the @yacc@ tool for C.
+
 extra-source-files:
 	ANNOUNCE
 	CHANGES
@@ -100,10 +100,13 @@ extra-source-files:
 	templates/GLR_Base.hs
 	templates/GenericTemplate.hs
 	templates/GLR_Lib.hs
+	tests/AttrGrammar001.y
+	tests/AttrGrammar002.y
 	tests/error001.y
 	tests/error001.stdout
 	tests/error001.stderr
 	tests/monad001.y
+	tests/monaderror.y
 	tests/Makefile
 	tests/TestMulti.ly
 	tests/Partial.ly
@@ -116,6 +119,10 @@ extra-source-files:
 	tests/Test.ly
 	tests/precedence002.y
 	tests/test_rules.y
+
+source-repository head
+  type:     git
+  location: http://github.com/simonmar/happy.git
 
 flag small_base
   description: Choose the new smaller, split-up base package.
@@ -130,11 +137,9 @@ executable Happy
     build-depends: base >= 1.0 && < 2.1
 
   build-depends: base < 5, mtl >= 1.0, deepseq
-  build-tools: perl
 
   extensions: CPP, MagicHash
-  if impl(ghc >= 7.1)
-    extensions: NondecreasingIndentation
+  ghc-options: -Wall -fno-warn-type-defaults
   other-modules:
         AbsSyn
         First
@@ -153,3 +158,8 @@ executable Happy
         AttrGrammar
         AttrGrammarParser
         ParamRules
+
+test-suite tests
+  type: exitcode-stdio-1.0
+  main-is: test.hs
+  build-depends: base, process
