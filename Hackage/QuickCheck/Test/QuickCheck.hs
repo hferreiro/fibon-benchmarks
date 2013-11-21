@@ -1,5 +1,6 @@
+{-# LANGUAGE CPP #-}
 module Test.QuickCheck
-  ( 
+  (
     -- * Running tests
     quickCheck
   , Args(..), Result(..)
@@ -7,7 +8,13 @@ module Test.QuickCheck
   , quickCheckWith
   , quickCheckWithResult
   , quickCheckResult
-    
+    -- ** Running tests verbosely
+  , verboseCheck
+  , verboseCheckWith
+  , verboseCheckWithResult
+  , verboseCheckResult
+  , verbose
+
     -- * Random generation
   , Gen
     -- ** Generator combinators
@@ -31,16 +38,18 @@ module Test.QuickCheck
   , sample
   , sample'
 
-    -- * Arbitrary and CoArbitrary classes.
+    -- * Arbitrary and CoArbitrary classes
   , Arbitrary(..)
   , CoArbitrary(..)
-  
+
     -- ** Helper functions for implementing arbitrary
   , arbitrarySizedIntegral
   , arbitrarySizedFractional
   , arbitrarySizedBoundedIntegral
   , arbitraryBoundedIntegral
   , arbitraryBoundedRandom
+  , arbitraryBoundedEnum
+  , coarbitraryEnum
     -- ** Helper functions for implementing shrink
   , shrinkNothing
   , shrinkIntegral
@@ -62,7 +71,9 @@ module Test.QuickCheck
   , NonNegative(..)
   , Smart(..)
   , Shrink2(..)
+#ifndef NO_MULTI_PARAM_TYPE_CLASSES
   , Shrinking(..)
+#endif
   , ShrinkState(..)
 
     -- * Properties
@@ -71,11 +82,18 @@ module Test.QuickCheck
   , mapSize
   , shrinking
   , (==>)
+  , discard
   , forAll
   , forAllShrink
+    -- *** Experimental combinators for conjunction and disjunction
   , (.&.)
+  , (.&&.)
+  , conjoin
+  , (.||.)
+  , disjoin
     -- *** Handling failure
   , whenFail
+  , printTestCase
   , whenFail'
   , expectFailure
   , within
@@ -84,7 +102,8 @@ module Test.QuickCheck
   , collect
   , classify
   , cover
-  
+  , once
+
     -- * Text formatting
   , Str(..)
   , ranges
@@ -100,6 +119,7 @@ import Test.QuickCheck.Modifiers
 import Test.QuickCheck.Property hiding ( Result(..) )
 import Test.QuickCheck.Test
 import Test.QuickCheck.Text
+import Test.QuickCheck.Exception
 
 --------------------------------------------------------------------------
 -- the end.

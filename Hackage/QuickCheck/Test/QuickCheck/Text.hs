@@ -1,15 +1,17 @@
 module Test.QuickCheck.Text
   ( Str(..)
   , ranges
-  
+
   , number
   , short
   , showErr
+  , oneLine
+  , isOneLine
   , bold
-  
+
   , newTerminal
-  , newStdioTerminal
-  , newNullTerminal
+  , withStdioTerminal
+  , withNullTerminal
   , terminalOutput
   , handle
   , Terminal
@@ -22,15 +24,20 @@ module Test.QuickCheck.Text
 --------------------------------------------------------------------------
 -- imports
 
+import Control.Applicative
 import System.IO
   ( hFlush
   , hPutStr
   , stdout
   , stderr
   , Handle
+  , BufferMode (..)
+  , hGetBuffering
+  , hSetBuffering
   )
 
 import Data.IORef
+import Test.QuickCheck.Exception
 
 --------------------------------------------------------------------------
 -- literal string
@@ -40,7 +47,7 @@ newtype Str = MkStr String
 instance Show Str where
   show (MkStr s) = s
 
-ranges :: (Integral a, Show a) => a -> a -> Str
+ranges :: (Show a, Integral a) => a -> a -> Str
 ranges k n = MkStr (show n' ++ " -- " ++ show (n'+k-1))
  where
   n' = k * (n `div` k)
@@ -62,6 +69,12 @@ short n s
 showErr :: Show a => a -> String
 showErr = unwords . words . show
 
+oneLine :: String -> String
+oneLine = unwords . words
+
+isOneLine :: String -> Bool
+isOneLine xs = '\n' `notElem` xs
+
 bold :: String -> String
 -- not portable:
 --bold s = "\ESC[1m" ++ s ++ "\ESC[0m"
@@ -81,17 +94,25 @@ newTerminal out err =
   do ref <- newIORef (return ())
      return (MkTerminal ref out err)
 
-newStdioTerminal :: IO Terminal
-newStdioTerminal = do
+withBuffering :: IO a -> IO a
+withBuffering action = do
+  mode <- hGetBuffering stderr
+  -- By default stderr is unbuffered.  This is very slow, hence we explicitly
+  -- enable line buffering.
+  hSetBuffering stderr LineBuffering
+  action `finally` hSetBuffering stderr mode
+
+withStdioTerminal :: (Terminal -> IO a) -> IO a
+withStdioTerminal action = do
   out <- output (handle stdout)
   err <- output (handle stderr)
-  newTerminal out err
+  withBuffering (newTerminal out err >>= action)
 
-newNullTerminal :: IO Terminal
-newNullTerminal = do
+withNullTerminal :: (Terminal -> IO a) -> IO a
+withNullTerminal action = do
   out <- output (const (return ()))
   err <- output (const (return ()))
-  newTerminal out err
+  newTerminal out err >>= action
 
 terminalOutput :: Terminal -> IO String
 terminalOutput (MkTerminal _ out _) = get out
@@ -129,20 +150,18 @@ putPart, putTemp, putLine :: Terminal -> String -> IO ()
 putPart tm@(MkTerminal _ out _) s =
   do flush tm
      put out s
-     
+
 putTemp tm@(MkTerminal _ _ err) s =
   do flush tm
-     put err s
-     put err [ '\b' | _ <- s ]
+     put err (s ++ [ '\b' | _ <- s ])
      postpone tm $
        put err ( [ ' ' | _ <- s ]
               ++ [ '\b' | _ <- s ]
                )
-     
+
 putLine tm@(MkTerminal _ out _) s =
   do flush tm
-     put out s
-     put out "\n"
+     put out (s ++ "\n")
 
 --------------------------------------------------------------------------
 -- the end.
