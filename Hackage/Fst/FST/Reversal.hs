@@ -1,30 +1,36 @@
-{-
-   **************************************************************
-   * Filename      : Reversal.hs                                *
-   * Author        : Markus Forsberg                            *
-   *                 d97forma@dtek.chalmers.se                  *
-   * Last Modified : 7 July, 2001                               *
-   * Lines         : 28                                         *
-   **************************************************************
+{- |
+Reverse an automaton
 -}
-
-module FST.Reversal ( reversal  -- Reverse an automaton.
-                ) where
+module FST.Reversal (
+  reversal
+  ) where
 
 import FST.Automaton
 
 import Data.Array
 
+-- | Reverse an automaton
 reversal :: Eq a => Automaton a -> Automaton a
-reversal automaton  = reverseTrans (rename (transitionTable automaton)
-                                           (alphabet automaton)
-                                           (finals automaton)
-                                           (initials automaton)
-                                           (firstState automaton))
+reversal automaton =
+  reverseTrans $
+  rename (transitionTable automaton)
+  (alphabet automaton)
+  (finals automaton)
+  (initials automaton)
+  (firstState automaton)
 
+-- | Helper function for automaton reversal
 reverseTrans :: Eq a => Automaton a -> Automaton a
-reverseTrans automaton = let bs    = (firstState automaton, lastState automaton)
-                             table = assocs $ accumArray (\tl1 tl2 -> tl1 ++ tl2) []
-                                      bs [(s1,[(a,s)]) | (s,tl) <- transitionTable automaton,
-                                                         (a,s1) <-  tl]
-                          in construct bs table (alphabet automaton) (initials automaton) (finals automaton)
+reverseTrans automaton =
+  construct bs table
+  (alphabet automaton)
+  (initials automaton)
+  (finals automaton) where
+    bs :: (StateTy, StateTy)
+    bs = (firstState automaton, lastState automaton)
+
+    table = assocs $ accumArray (++) [] bs
+            [(s1,[(a,s)])
+            | (s,tl) <- transitionTable automaton
+            , (a,s1) <-  tl]
+

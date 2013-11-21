@@ -1,5 +1,6 @@
--- parser produced by Happy Version 1.10
-
+{- |
+Parser produced by Happy Version 1.10
+-}
 module FST.Parse where
 
 import FST.NReg
@@ -467,7 +468,7 @@ happyReduce_6 = happyMonadReduce 1 7 happyReduction_6
 happyReduction_6 ((HappyTerminal (TokenFun  happy_var_1)) `HappyStk`
 	happyRest)
 	 = happyThen ( case (parseList (snd $ snd happy_var_1) []) of
-				      FailE str -> failE $ "\nfstStudio failed to parse.\nParse error at line: "++ show (fst happy_var_1) ++"\n"
+				      FailE str -> failE $ "Parse failure: parse error at line "++ show (fst happy_var_1)
 				      Ok  list  -> returnE $ Fun (fst $ snd happy_var_1) list
 	) (\r -> happyReturn (HappyAbsSyn7 r))
 
@@ -675,7 +676,36 @@ parse tks = happyThen (happyParse action_0 tks) (\x -> case x of {HappyAbsSyn5 z
 parseNReg tks = happyThen (happyParse action_1 tks) (\x -> case x of {HappyAbsSyn7 z -> happyReturn z; _other -> notHappyAtAll })
 
 happyError :: [Token] -> E a
-happyError _ = failE $ "\nfstStudio failed to parse.\n No useful message can be printed.\n"
+happyError []    = failE $ "Parse failure"
+happyError (t:_) = failE $ "Parse failure at symbol '"++ show t ++"' on line " ++ show (getLineNo t)
+  where
+    getLineNo :: Token -> Int
+    getLineNo (TokenSemi l)         = l
+    getLineNo (TokenHOB l)          = l
+    getLineNo (TokenHCB l)          = l
+    getLineNo (TokenSOB l)          = l
+    getLineNo (TokenSCB l)          = l
+    getLineNo (TokenConcatS (l,_))  = l
+    getLineNo (TokenStar l)         = l
+    getLineNo (TokenComplement l)   = l
+    getLineNo (TokenContainment l)  = l
+    getLineNo (TokenMinus l)        = l
+    getLineNo (TokenIntersect l)    = l
+    getLineNo (TokenUnion l)        = l
+    getLineNo (TokenPlus l)         = l
+    getLineNo (TokenEps l)          = l
+    getLineNo (TokenAll l)          = l
+    getLineNo (TokenS (l,_))        = l
+    getLineNo (TokenRelation l)     = l
+    getLineNo (TokenCrossproduct l) = l
+    getLineNo (TokenComposition l)  = l
+    getLineNo (TokenRepeat l)       = l
+    getLineNo (TokenNum (l,_))      = l
+    getLineNo (TokenFun (l,_))      = l
+    getLineNo (TokenMain l)         = l
+    getLineNo (TokenDef  l)         = l
+    getLineNo (TokenVar (l,_))      = l
+    getLineNo (Err str)             = 0
 
 data E a =   Ok a
 	   | FailE String
@@ -702,7 +732,7 @@ functional (Ok def)     = case (getMain def) of
                            FailE str -> FailE str
 functional (FailE str)  = FailE str
 
-getMain []             = failE "\nfstStudio failed to parse.\nNo main function exists.\n"
+getMain []             = failE "Parse failure: no main function exists."
 getMain ((Main n1):xs) = Ok n1
 getMain (_:xs)         = getMain xs
 
@@ -717,7 +747,7 @@ apply  (NComplement n1)   env = do liftM  NComplement (apply n1 env)
 apply  (Fun str ns)       env = do applyFun (str,ns) env env
 apply  n1                 _   = returnE n1
 
-applyFun (str,_) []   _      = failE $ "\nfstStudio failed to parse.\nFound a unidentified function: " ++ str ++ "\n"
+applyFun (str,_) []   _      = failE $ "Parse failure: unidentified function: " ++ str
 applyFun (str,ns) ((Function name vars n1):xs) env
  | str == name               = do res <- (replace n1 (zip vars ns))
 				  apply res env
@@ -734,7 +764,7 @@ replace (NIntersect n1 n2)  env  = do liftM2 NIntersect  (replace n1 env) (repla
 replace (NComplement n1)    env  = do liftM NComplement  (replace n1 env)
 replace (NVar str)          env  = case (lookup str env) of
 				    Just n1 -> returnE n1
-				    Nothing -> failE $ "\nfstStudio failed to parse.\nFound a unidentified variable: " ++ str ++"\n"
+				    Nothing -> failE $ "Parse failure: unidentified variable: " ++ str
 replace n1                  env  = returnE n1
 
 parseList :: [String] -> [NReg String] -> E ([NReg String])
@@ -743,19 +773,21 @@ parseList (str:list) res = case ((parseNReg.lexer) str) of
 			    FailE str -> FailE str
 			    Ok n1     -> parseList list (n1:res)
 
+-- | Parse a regular expression from a string
 parseExp :: String -> Either String (RReg String)
 parseExp str = case ((parseNReg.lexer) str) of
-                FailE str -> Left "\nfstStudio failed to parse given expression.\n"
+                FailE str -> Left $ "Failed to parse expression: " ++ str
                 Ok n1 -> case (toRReg (nVarToSymbol n1)) of
                           Just rreg -> Right rreg
-                          Nothing -> Left "\nfstStudio failed to parse given expression.\n"
+                          Nothing -> Left $ "Failed to parse expression: " ++ str
 
+-- | Parse a program from a string
 parseProgram :: String -> Either String (RReg String)
 parseProgram str = case ((functional.parse.lexer) str) of
                     FailE str -> Left str
                     Ok n1     -> case (toRReg n1) of
                                   Just rreg -> Right  rreg
-                                  Nothing   -> Left "\nfstStudio failed to parse.\nNo main function exists.\n"
+                                  Nothing   -> Left "Parse failure."
 {-# LINE 1 "GenericTemplate.hs" -}
 {-# LINE 1 "GenericTemplate.hs" -}
 -- $Id: GenericTemplate.hs,v 1.11 2001/03/30 14:24:07 simonmar Exp $

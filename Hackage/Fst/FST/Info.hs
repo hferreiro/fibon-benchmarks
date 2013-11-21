@@ -1,122 +1,72 @@
-{-
-   **************************************************************
-   * Filename      : Info.hs                                    *
-   * Author        : Markus Forsberg                            *
-   *                 d97forma@dtek.chalmers.se                  *
-   * Last Modified : 6 July, 2001                               *
-   * Lines         : 89                                         *
-   **************************************************************
+{- |
+State data structure for the interactive shell
 -}
-
 module FST.Info where
 
 import FST.TransducerInterface
 
+-- | State in interactive shell
 data Info = Info {
-                  transducer :: (Transducer String,Bool),
-		  expression :: (RReg String,Bool),
-		  input      :: ([String],Bool),
-		  outputs    :: ([String],Bool)
-		  }
+  transducer :: (Transducer String, Bool),
+  expression :: (RReg String, Bool),
+  input      :: ([String], Bool),
+  outputs    :: ([String], Bool)
+  } deriving (Show)
 
-clearInfo :: Info -> Info
-clearInfo info = info { transducer = (emptyTransducer,False),
-                        expression = (empty,False),
-                        input      = ([],False),
-                        outputs    = ([],False) }
-
+-- | Empty information
 emptyInfo :: Info
 emptyInfo = Info {
-                   transducer = (emptyTransducer,False),
-                   expression = (empty,False),
-                   input      = ([],False),
-                   outputs    = ([],False)
-                 }
+  transducer = (emptyTransducer, False),
+  expression = (empty, False),
+  input      = ([], False),
+  outputs    = ([], False)
+  }
 
+-- | Is there a built transducer in the state?
 transducerBuilt :: Info -> Bool
-transducerBuilt info = snd $ transducer info
+transducerBuilt = snd . transducer
 
+-- | Is there a read expression in the state?
 expressionRead :: Info -> Bool
-expressionRead info = snd $ expression info
+expressionRead = snd . expression
 
+-- | Is there an input in the state?
 inputRead :: Info -> Bool
-inputRead info = snd $ input info
+inputRead = snd . input
 
+-- | Is there an output in the state?
 outputsRead :: Info -> Bool
-outputsRead info = snd $ outputs info
+outputsRead = snd . outputs
 
+-- | Set transducer in state
 updateTransducer :: Transducer String -> Info -> Info
-updateTransducer t info = info {transducer = (t,True)}
+updateTransducer t info = info { transducer = (t, True) }
 
+-- | Set expression in state
 updateExpression :: RReg String -> Info -> Info
-updateExpression r info = info {expression = (r,True)}
+updateExpression r info = info { expression = (r, True) }
 
+-- | Set input in state
 updateInput :: [String] -> Info -> Info
-updateInput inp info = info {input = (inp,True)}
+updateInput inp info = info { input = (inp, True) }
 
+-- | Set outputs in state
 updateOutputs :: [String] -> Info -> Info
-updateOutputs out info = info { outputs = (out,True)}
+updateOutputs out info = info { outputs = (out, True) }
 
+-- | Get transducer from state
 getTransducer :: Info -> Transducer String
-getTransducer = fst.transducer
+getTransducer = fst . transducer
 
+-- | Get expression from state
 getExpression :: Info -> RReg String
-getExpression = fst.expression
+getExpression = fst . expression
 
+-- | Get input from state
 getInput :: Info -> [String]
-getInput = fst.input
+getInput = fst . input
 
+-- | Get outputs from state
 getOutputs :: Info -> [String]
-getOutputs = fst.outputs
+getOutputs = fst . outputs
 
-noTransducer :: IO ()
-noTransducer = do putStrLn "No transducer has been loaded/built."
-
-noExpression :: IO ()
-noExpression = do putStrLn "No regular expression has been typed/loaded into fstStudio."
-
-noInput :: IO ()
-noInput = do putStrLn "No input has been loaded into fstStudio."
-
-noOutputs :: IO ()
-noOutputs = do putStrLn "No outputs has been produced."
-
-help :: IO ()
-help = do putStrLn "\nList of Commands:"
-          putStrLn "r <reg exp>    : read a regular relation from standard input."
-	  putStrLn "b              : build a deterministic, minimal transducer."
-	  putStrLn "bn             : build a possibly non-deterministic, non-minimal transducer."
-	  putStrLn "m              : minimize loaded/built transducer."
-          putStrLn "det            : determinize loaded/built transducer."
-	  putStrLn "s  <filename>  : save to file."
-	  putStrLn "l  <filename>  : load from file."
-	  putStrLn "l a | b        : load and union."
-	  putStrLn "l a b          : load and concatenate."
-	  putStrLn "l a *          : load and apply Kleene's star."
-	  putStrLn "l a .o. b      : load and compose."
-	  putStrLn "vt             : view loaded/built transducer."
-	  putStrLn "vr             : view typed/loaded regular relation."
-          putStrLn "vi             : view loaded input."
-          putStrLn "vo             : view produced output."
-          putStrLn "d              : apply transducer down with loaded input."
-          putStrLn "u              : apply transducer up with loaded input."
-	  putStrLn "d <symbols>    : apply transducer down with symbols."
-	  putStrLn "u <symbols>    : apply transducer up with symbols."
-	  putStrLn "c              : Clear memory."
-	  putStrLn "h              : display list of commands."
-	  putStrLn "q              : end session.\n"
-
-prompt :: IO ()
-prompt = do putStr ">"
-
-fstStudio :: IO ()
-fstStudio = do putStrLn "\n*****************************************************"
-	       putStrLn "* Welcome to Finite State Transducer Studio!        *"
-	       putStrLn "* Written purely in Haskell.                        *"
-	       putStrLn "* Version : 0.9                                     *"
-	       putStrLn "* Date    : 11 August 2001                          *"
-	       putStrLn "* Author  : Markus Forsberg                         *"
-	       putStrLn "* Please send bug reports/suggestions to:           *"
-	       putStrLn "* d97forma@dtek.chalmers.se                         *"
-	       putStrLn "*****************************************************\n"
-	       putStrLn "Type 'h' for help.\n"

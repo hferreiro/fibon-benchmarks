@@ -1,20 +1,15 @@
-{-
-   **************************************************************
-   * Filename      : ReversalT.hs                               *
-   * Author        : Markus Forsberg                            *
-   *                 d97forma@dtek.chalmers.se                  *
-   * Last Modified : 7 July, 2001                               *
-   * Lines         : 30                                         *
-   **************************************************************
+{- |
+Reverse an transducer
 -}
-
-module FST.ReversalT ( reversal  -- Reverse a transducer.
-                 ) where
+module FST.ReversalT (
+  reversal
+  ) where
 
 import FST.Transducer
 
 import Data.Array
 
+-- | Reverse a transducer
 reversal :: Eq a => Transducer a -> Transducer a
 reversal transducer  = reverseTrans (rename (transitionTable transducer)
                                            (alphabet transducer)
@@ -22,6 +17,7 @@ reversal transducer  = reverseTrans (rename (transitionTable transducer)
                                            (initials transducer)
                                            (firstState transducer))
 
+-- | Helper function for transducer reversal
 reverseTrans :: Eq a => Transducer a -> Transducer a
 reverseTrans transducer = let bs    = (firstState transducer, lastState transducer)
                               table = assocs $ accumArray (\tl1 tl2 -> tl1 ++ tl2) []

@@ -1,51 +1,81 @@
-{-
-   **************************************************************
-   * Filename      : Arguments.hs                               *
-   * Author        : Markus Forsberg                            *
-   *                 d97forma@dtek.chalmers.se                  *
-   * Last Modified : 6 July, 2001                               *
-   * Lines         : -                                          *
-   **************************************************************
+{- |
+Helper functions for handling shell/command-line options
 -}
+module FST.Arguments (
 
-module FST.Arguments ( parseInteractive,
-                   InteractiveCommand(..),
-                   isFST,
-                   isDAT,
-                   isNET,
-                   isTHIS,
-                   parseBatch,
-                   inputB,
-                   outputB,
-                   isUpB
-                 ) where
+  -- * Commands ADT
+  InteractiveCommand (..),
+  BatchCommand (..),
 
-import FST.GetOpt
+  -- * Helper functions
+  parseInteractive,
+  isFST,
+  isDAT,
+  isNET,
+  isTHIS,
+  parseBatch,
+  inputB,
+  outputB,
+  isUpB
+  ) where
 
-data InteractiveCommand = BuildTransducer                |
-                          BuildNTransducer               |
-                          Minimize                       |
-                          Determinize                    |
-			  StdInReg String                |
-			  Load FilePath                  |
-                          LUnion FilePath FilePath       |
-                          LProduct FilePath FilePath     |
-                          LStar FilePath                 |
-                          LComposition FilePath FilePath |
-			  Save FilePath                  |
-			  ApplyDown                      |
-			  ApplyUp                        |
-			  ApplyD [String]                |
-			  ApplyU [String]                |
-			  ViewReg                        |
-			  ViewInput                      |
-			  ViewOutput                     |
-                          ViewTransducer                 |
-			  Help                           |
-			  ClearMemory                    |
-			  Quit                           |
-			  NoCommand
+import System.Console.GetOpt 
+import Data.List
+import Data.Maybe
 
+-- | ADT for a shell command
+data InteractiveCommand =
+  -- | Build an epsilon-free, deterministic, minimal transducer from a
+  -- loaded/typed regular relation.
+    BuildTransducer                
+  -- | Build an epsilon-free, possibly non-deterministic, non-minimal
+  -- transducer from a load/typed regular relation.
+  | BuildNTransducer
+  -- | Minimize a built transducer.
+  | Minimize
+  -- | Determinize a built transducer.
+  | Determinize
+  -- | Read a regular relation from standard input.
+  | StdInReg String
+  -- | Load from FILE.
+  | Load FilePath
+  -- | Load and union two transducers.
+  | LUnion FilePath FilePath
+  -- | Load and concatenate two transducers.
+  | LProduct FilePath FilePath
+  -- | Load and apply Kleene's star on a transducer.
+  | LStar FilePath
+  -- | Load and compose two transducers.
+  | LComposition FilePath FilePath
+  -- | Save to file.
+  | Save FilePath
+  -- | Apply transducer down with loaded input.
+  | ApplyDown
+  -- | Apply transducer up with loaded input.
+  | ApplyUp
+  -- | Apply tranducer down with given symbols.
+  | ApplyD [String]
+  -- | Apply tranducer up with given symbols.
+  | ApplyU [String]
+  -- | View loaded/typed regular relation.
+  | ViewReg
+  -- | View loaded input.
+  | ViewInput
+  -- | View prodeced output.
+  | ViewOutput
+  -- | View loaded/built transducer.
+  | ViewTransducer
+  -- | List commands.
+  | Help
+  -- | Clear loaded transducers/input/output.
+  | ClearMemory
+  -- | Quit the shell
+  | Quit
+  -- | Unparseable command
+  | NoCommand
+  deriving (Eq, Show)
+
+-- | Parse input string into a command
 parseInteractive :: [String] -> InteractiveCommand
 parseInteractive ["b"]                   = BuildTransducer
 parseInteractive ["bn"]                  = BuildNTransducer
@@ -71,61 +101,69 @@ parseInteractive ["q"]                   = Quit
 parseInteractive ["c"]                   = ClearMemory
 parseInteractive _                       = NoCommand
 
+-- | Does the file end with .fst?
 isFST :: String -> Bool
-isFST str = case (reverse str) of
-	     ('t':'s':'f':'.':_)  -> True
-	     _                    -> False
+isFST = isSuffixOf ".fst"
 
+-- | Does the file end with .dat?
 isDAT :: String -> Bool
-isDAT str = case (reverse str) of
-	     ('t':'a':'d':'.':_)  -> True
-	     _                    -> False
+isDAT = isSuffixOf ".dat" 
 
+-- | Does the file end with .net?
 isNET :: String -> Bool
-isNET str = case (reverse str) of
-             ('t':'e':'n':'.':_) -> True
-             _                 -> False
+isNET = isSuffixOf ".net" 
 
+-- | Is the internal transducer being specified?
 isTHIS :: String -> Bool
 isTHIS = (== "*")
 
+-- | Is apply up?
 isApplyUp :: [String] -> Bool
 isApplyUp = elem "-u"
 
-data BatchCommand = DownB                   |
-		    UpB                     |
-		    InvalidCommand          |
-		    Input String            |
-		    Output String           |
-		    HelpB
- deriving Show
+-- | Batch command ADT
+data BatchCommand =
+  -- | Apply down
+    DownB
+  -- | Apply up
+  | UpB
+  -- | Invalid command
+  | InvalidCommand
+  -- | Take input from given file
+  | Input String
+  -- | Write output to file
+  | Output String
+  -- | Display help
+  | HelpB
+  deriving (Eq, Show)
 
+-- | Information for parsing batch options
 batchOptions :: [OptDescr BatchCommand]
-batchOptions = [Option ['u'] ["up"]     (NoArg UpB)             "apply the transducer up (default is down)",
-                Option ['d'] ["down"]   (NoArg DownB)           "apply the transducer down (default)",
-                Option ['i'] ["input"]  (ReqArg Input "FILE")  "read input from FILE",
-                Option ['o'] ["output"] (ReqArg Output "FILE") "write output to FILE"]
+batchOptions = [
+  Option ['u'] ["up"]     (NoArg UpB)            "apply the transducer up (default is down)",
+  Option ['d'] ["down"]   (NoArg DownB)          "apply the transducer down (default)",
+  Option ['i'] ["input"]  (ReqArg Input "FILE")  "read input from FILE",
+  Option ['o'] ["output"] (ReqArg Output "FILE") "write output to FILE"
+  ]
 
+-- | Parse batch commands
 parseBatch :: [String] -> Either String (FilePath,[BatchCommand])
 parseBatch cmdline = case getOpt Permute batchOptions cmdline of
-                      (o,[file],[]) -> Right (file,o)
-                      (_,_,errs)    -> Left $ concat errs ++ usageInfo header batchOptions
- where header = "Usage: fst [FILE.net or FILE.fst] [OPTIONS...]"
+  (o, [file], [])   -> Right (file, o)
+  (_, _,      errs) -> Left (concat errs ++ usageInfo header batchOptions) where
+    header = "Usage: fst [FILE.net or FILE.fst] [OPTIONS...]"
 
-inputB :: [BatchCommand] -> Maybe FilePath
-inputB               [] = Nothing
-inputB ((Input file):_) = return file
-inputB (_:xs)           = inputB xs
+-- | Handle batch input command
+inputB  :: [BatchCommand] -> Maybe FilePath
+inputB  cs = listToMaybe [ file | Input  file <- cs ]
 
+-- | Handle batch output command
 outputB :: [BatchCommand] -> Maybe FilePath
-outputB []                = Nothing
-outputB ((Output file):_) = return file
-outputB (_:xs)            = outputB xs
+outputB cs = listToMaybe [ file | Output file <- cs ]
 
+-- | Is batch command apply up?
 isUpB :: [BatchCommand] -> Bool
-isUpB []      = False
-isUpB (UpB:_) = True
-isUpB (_:xs)  = isUpB xs
+isUpB = elem UpB
 
 {-
 -----------------------------------------------------------------------------------------

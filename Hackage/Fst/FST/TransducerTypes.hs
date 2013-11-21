@@ -1,74 +1,57 @@
-{-
-   **************************************************************
-   * Filename      : TransducerTypes.hs                         *
-   * Author        : Markus Forsberg                            *
-   *                 d97forma@dtek.chalmers.se                  *
-   * Last Modified : 6 July, 2001                               *
-   * Lines         : 75                                         *
-   **************************************************************
+{- |
+Type system for transducers
 -}
+module FST.TransducerTypes (
 
-module FST.TransducerTypes ( State,
-                         FinalStates,
-                         FirstState,
-                         LastState,
-                         Sigma,
-                         Relation,
-                         Upper,
-                         Lower,
-                         Symbol (..),
-                         TTransitions,
-                         TTransitionTable,
-                         InitialStates,
-                         TransducerFunctions,
-                         states,
-                         isFinal,
-                         initials,
-                         finals,
-                         transitionTable,
-                         transitionList,
-                         transitionsU,
-                         transitionsD,
-                         firstState,
-                         lastState,
-                         alphabet
-                       ) where
+  -- * Types
+  StateTy,
+  FinalStates,
+  FirstState,
+  LastState,
+  Sigma,
+  Relation,
+  Upper,
+  Lower,
+  Symbol (..),
+  TTransitions,
+  TTransitionTable,
+  InitialStates,
+  TransducerFunctions (..),
+  ) where
 
-import FST.AutomatonTypes (State,FinalStates,Sigma,FirstState,LastState,
-                       InitialStates)
+import FST.AutomatonTypes (
+  StateTy, FinalStates, Sigma, FirstState, LastState, InitialStates
+  )
 
-{- **********************************************************
-   * Transducer types                                       *
-   **********************************************************
--}
-
+-- | A relation between upper/lower languages
 type Relation a = (Upper a, Lower a)
+
+-- | Upper language
 type Upper a = Symbol a
+
+-- | Lower language
 type Lower a = Symbol a
 
-data Symbol a
- =    S a   |
-      Eps
-    deriving (Show,Read,Eq)
+-- | A symbol
+data Symbol a = S a | Eps
+    deriving (Show, Read, Eq)
 
-type TTransitions a = [(Relation a,State)]
+-- | Transducer transitions
+type TTransitions a = [(Relation a, StateTy)]
 
-type TTransitionTable a = [(State,[(Relation a,State)])]
+-- | Transducer transition table
+type TTransitionTable a = [(StateTy, [(Relation a, StateTy)])]
 
-{- **********************************************************
-   * Class of TransducerFunctions                           *
-   **********************************************************
--}
-
+-- | Class of TransducerFunctions
 class TransducerFunctions f where
- states         :: f a -> [State]
- isFinal        :: f a -> State -> Bool
- initials       :: f a -> InitialStates
- finals         :: f a -> FinalStates
- transitionTable :: f a -> TTransitionTable a
- transitionList :: f a -> State -> TTransitions a
- transitionsU    :: Eq a => f a -> (State, Symbol a) -> [(Symbol a, State)]
- transitionsD    :: Eq a => f a -> (State, Symbol a) -> [(Symbol a, State)]
- firstState     :: f a -> State
- lastState      :: f a -> State
- alphabet       :: f a -> Sigma a
+  states          :: f a -> [StateTy]
+  isFinal         :: f a -> StateTy -> Bool
+  initials        :: f a -> InitialStates
+  finals          :: f a -> FinalStates
+  transitionTable :: f a -> TTransitionTable a
+  transitionList  :: f a -> StateTy -> TTransitions a
+  transitionsU    :: Eq a => f a -> (StateTy, Symbol a) -> [(Symbol a, StateTy)]
+  transitionsD    :: Eq a => f a -> (StateTy, Symbol a) -> [(Symbol a, StateTy)]
+  firstState      :: f a -> StateTy
+  lastState       :: f a -> StateTy
+  alphabet        :: f a -> Sigma a

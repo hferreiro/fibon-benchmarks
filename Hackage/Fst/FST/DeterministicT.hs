@@ -1,48 +1,39 @@
-{-
-   **************************************************************
-   * Filename      : DeterministicT.hs                          *
-   * Author        : Markus Forsberg                            *
-   *                 d97forma@dtek.chalmers.se                  *
-   * Last Modified : 6 July, 2001                               *
-   * Lines         : 78                                         *
-   **************************************************************
+{- |
+Function for making transducers deterministic
 -}
-
-module FST.DeterministicT ( determinize,  -- Makes an transducer deterministic
-                                      -- and usefulS.
-                      ) where
+module FST.DeterministicT (
+  determinize
+  ) where
 
 import FST.Transducer
 
 import Data.List (sort, nub)
 
+-- | A subset is an ordered set without duplication
+newtype SubSet = SubSet [StateTy]
 
-{- *************************************
-   * Types for subsets.                *
-   *************************************
--}
+-- | A list of subets
+type SubSets = [SubSet]
 
-newtype SubSet  = SubSet [State] -- a subset is an ordered set
-                                 -- without duplication.
-type    SubSets = [SubSet]
-type    Done    = SubSets
-type    UnDone  = SubSets
-type    SubTransitions a = [(SubSet, [(Relation a,SubSet)])]
+-- | List of processed states
+type Done = SubSets
+
+-- | List of unprocessed states
+type UnDone = SubSets
+
+-- | Subset transitions
+type SubTransitions a = [(SubSet, [(Relation a,SubSet)])]
 
 instance Eq (SubSet) where
  (SubSet xs) == (SubSet ys) = xs == ys
 
-sub :: [State] -> SubSet
+sub :: [StateTy] -> SubSet
 sub sts = SubSet $ sort $ nub sts
 
 containsFinal :: Transducer a -> SubSet -> Bool
 containsFinal automaton (SubSet xs) = or $ map (isFinal automaton) xs
 
-{- ************************************************
-   * Construct a deterministic, usefulS automaton. *
-   ************************************************
--}
-
+-- | Construct a deterministic, usefulS transducer
 determinize :: Ord a => Transducer a -> Transducer a
 determinize automaton = let inS = sub $ initials automaton in
                             det automaton ([],[inS]) []
@@ -66,7 +57,7 @@ getTransitions auto subset@(SubSet xs) trans
    = let tr = groupBySymbols (concat $ map (transitionList auto) xs) [] in
          (map snd tr, ((subset,tr):trans))
 
-groupBySymbols :: Eq a => [(a,State)] -> [(a,[State])] -> [(a,SubSet)]
+groupBySymbols :: Eq a => [(a,StateTy)] -> [(a,[StateTy])] -> [(a,SubSet)]
 groupBySymbols []         tr = map (\(a,xs) -> (a,sub xs)) tr
 groupBySymbols ((a,s):xs) tr = groupBySymbols xs (ins (a,s) tr)
  where ins (a1,s1) [] = [(a1,[s1])]

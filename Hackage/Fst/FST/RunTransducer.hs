@@ -1,66 +1,61 @@
-{-
-   **************************************************************
-   * Filename      : RunTransducer.hs                           *
-   * Author        : Markus Forsberg                            *
-   *                 d97forma@dtek.chalmers.se                  *
-   * Last Modified : 6 July, 2001                               *
-   * Lines         : 88                                         *
-   **************************************************************
+{- |
+Running a transducer with some input
 -}
-
-module FST.RunTransducer ( applyUp,
-                       applyDown
-                      ) where
+module FST.RunTransducer (
+  -- * Run functions
+  applyUp, applyDown
+  ) where
 
 import FST.Transducer
 
 import Data.Maybe (catMaybes)
 
-type TransitionFunction a = (Transducer a -> (State,Symbol a) ->
-                                             [(Symbol a,State)])
+-- | A transition betwee states in a transducer
+type TransitionFunction a = (Transducer a -> (StateTy,Symbol a) ->
+                                             [(Symbol a,StateTy)])
 
+-- | Apply a transducer upwards
 applyUp :: Eq a => Transducer a -> [a] -> Maybe [[a]]
 applyUp transducer input
  = apply transducer transitionsD input (initial transducer) []
 
+-- | Apply a transducer downwards
 applyDown :: Eq a => Transducer a -> [a] -> Maybe [[a]]
 applyDown transducer input
  = apply transducer transitionsU input (initial transducer) []
 
-apply :: Eq a => Transducer a -> TransitionFunction a -> [a] -> State ->
+-- | Generic function for applying a transducer
+apply :: Eq a => Transducer a -> TransitionFunction a -> [a] -> StateTy ->
                  [Symbol a] -> Maybe [[a]]
-apply transducer transFun input s  result =
+apply transducer transFun input s result =
  case (runEpsilon transducer transFun input s result,
-       runSymbol transducer transFun input s result) of
-   (Just xs, Just ys) -> Just $ xs ++ ys
-   (a, Nothing)       -> a
-   (Nothing, b)       -> b
+       runSymbol  transducer transFun input s result) of
+   (Just xs, Just ys) -> Just (xs ++ ys)
+   (a,       Nothing) -> a
+   (Nothing, b      ) -> b
 
-runEpsilon :: Eq a => Transducer a -> TransitionFunction a -> [a] -> State ->
+runEpsilon :: Eq a => Transducer a -> TransitionFunction a -> [a] -> StateTy ->
                  [Symbol a] -> Maybe [[a]]
 runEpsilon transducer transFun input s result =
- case (transFun transducer (s,Eps)) of
+ case transFun transducer (s, Eps) of
   [] -> Nothing
-  tl -> case (concat $ catMaybes $
-         map (\(a,s1) -> apply transducer transFun input s1 (a:result)) tl) of
+  tl -> case concat $ catMaybes $
+         map (\(a,s1) -> apply transducer transFun input s1 (a:result)) tl of
          [] -> Nothing
-         xs -> return xs
+         xs -> Just xs
 
-runSymbol :: Eq a => Transducer a -> TransitionFunction a -> [a] -> State ->
+runSymbol :: Eq a => Transducer a -> TransitionFunction a -> [a] -> StateTy ->
                  [Symbol a] -> Maybe [[a]]
 runSymbol transducer _ [] s result
- | isFinal transducer s = return [transform result]
+ | isFinal transducer s = Just [transform result]
  | otherwise            = Nothing
 runSymbol transducer transFun (i:input) s result =
  case (transFun transducer (s,S i)) of
   [] -> Nothing
-  tl -> case (concat $ catMaybes $
-         map (\(a,s1) -> apply transducer transFun input s1 (a:result)) tl) of
+  tl -> case concat $ catMaybes $
+         map (\(a,s1) -> apply transducer transFun input s1 (a:result)) tl of
          [] -> Nothing
-         xs -> return xs
+         xs -> Just xs
 
 transform :: [Symbol a] -> [a]
-transform ys = transform' ys []
- where transform' []         res = res
-       transform' ((S a):xs) res = transform' xs (a:res)
-       transform' ((_:xs))   res = transform' xs res
+transform ys = reverse [ a | S a <- ys ]
