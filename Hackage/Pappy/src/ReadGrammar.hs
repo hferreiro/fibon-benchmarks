@@ -1,7 +1,7 @@
 -- Packrat parser for Pappy grammar definition files
 module ReadGrammar (pappyParse, pappyParseFile) where
 
-import Char
+import Data.Char
 
 import Pos
 import Parse

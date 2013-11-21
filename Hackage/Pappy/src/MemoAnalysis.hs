@@ -1,6 +1,6 @@
 module MemoAnalysis (memoAnalysis) where
 
-import List
+import Data.List
 import Pappy
 
 

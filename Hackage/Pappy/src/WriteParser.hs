@@ -1,6 +1,6 @@
 module WriteParser where
 
-import Char
+import Data.Char
 
 import Pappy
 
