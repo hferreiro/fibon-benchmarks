@@ -40,6 +40,7 @@ import Data.List   (isPrefixOf)
 import System.Environment (getArgs)
 import System.Console.GetOpt
 import System.IO     (hPutStrLn,stderr) -- for usage
+
 import Fibon.Run.BenchmarkHelper
 
 type ParseF = Fasta.FHParser

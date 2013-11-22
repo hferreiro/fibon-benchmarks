@@ -1,5 +1,5 @@
 Name:           xsact
-Version:        1.7.1
+Version:        1.7.3
 License:        GPL
 License-File:   LICENSE
 Author:         Ketil Malde
@@ -21,24 +21,27 @@ Homepage:       http://malde.org/~ketil/
 
 Cabal-Version:  >= 1.2
 Build-Type:     Simple
-Tested-With:    GHC==6.8.2
+Tested-With:    GHC==6.10.4
 
 Executable     Xsact
                Main-Is:        Xsact.lhs
-               Hs-Source-Dirs: src ../../../../../tools/fibon-run
+               Hs-Source-Dirs: . ../../../../../tools/fibon-run
                Build-Depends:  base >3 && <5, containers, random, array, unix, directory, process, deepseq
-               Ghc-Options:    -funbox-strict-fields
+               Other-Modules:  Clix, EST, Fasta, Suffix, Pairs, Stats, Cluster, Gene, Indexed, ANSI
+               Ghc-Options:    -Wall -O2 -funbox-strict-fields
 
 Executable     xplit
                Buildable:      False
                Main-Is:        Xplit.lhs
+               Other-Modules:  Util
                Hs-Source-Dirs: .
-               Ghc-Options:    -Wall -funbox-strict-fields
+               Ghc-Options:    -Wall -O2 -funbox-strict-fields
                Build-Depends:  base
 
 Executable     xtract
                Buildable:      False
                Main-Is:        Xtract.lhs
+               Other-Modules:  Fasta, WordMap, SpliceGraph, EST, Util
                Hs-Source-Dirs: .
-               Ghc-Options:    -Wall -funbox-strict-fields
+               Ghc-Options:    -Wall -O2 -funbox-strict-fields
                Build-Depends:  base, random, array, containers
