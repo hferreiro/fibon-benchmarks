@@ -33,8 +33,8 @@ failures states as long as we cannot find them in the sets.
 
 > import Text.Regex.PDeriv.RE
 > import Text.Regex.PDeriv.Pretty (Pretty(..))
-> import Text.Regex.PDeriv.Common (Range, Letter, IsEmpty(..), my_hash, my_lookup, GFlag(..), IsGreedy(..), nub2)
-> import Text.Regex.PDeriv.IntPattern (Pat(..), pdPat, pdPat0, toBinder, Binder(..), strip, listifyBinder)
+> import Text.Regex.PDeriv.Common (Range(..), Letter, PosEpsilon(..), Simplifiable(..), my_hash, my_lookup, GFlag(..), IsGreedy(..), nub2, preBinder, mainBinder, subBinder)
+> import Text.Regex.PDeriv.IntPattern (Pat(..), pdPat, pdPat0, pdPat0Sim, toBinder, Binder(..), strip, listifyBinder)
 > import Text.Regex.PDeriv.Parse
 > import qualified Text.Regex.PDeriv.Dictionary as D (Dictionary(..), Key(..), insertNotOverwrite, lookupAll, empty, isIn, nub)
 
@@ -78,8 +78,8 @@ target_state * letter to source_state.
 
 
 
-> rg_collect :: S.ByteString -> (Int,Int) -> S.ByteString
-> rg_collect w (i,j) = S.take (j' - i' + 1) (S.drop i' w)
+> rg_collect :: S.ByteString -> Range -> S.ByteString
+> rg_collect w (Range i j) = S.take (j' - i' + 1) (S.drop i' w)
 >	       where i' = fromIntegral i
 >	             j' = fromIntegral j
 
@@ -105,7 +105,7 @@ we also record the reverse transition in another hash table, which will be used 
 >     let sig = map (\x -> (x,0)) (sigmaRE (strip init))         --  the sigma
 >         init_dict = D.insertNotOverwrite (D.hash init) (init,0) D.empty         --  add init into the initial dictionary
 >         (all, delta, dictionary) = sig `seq` builder sig [] [] [init] init_dict 1   --  all states and delta
->         final = all `seq`  [ s | s <- all, isEmpty (strip s)]                   --  the final states
+>         final = all `seq`  [ s | s <- all, posEpsilon (strip s)]                   --  the final states
 >         sfinal = final `seq` dictionary `seq` map (mapping dictionary) final
 >         sdelta = [ (i,l,jfs) | 
 >                   (p,l, qfs) <- delta, 
@@ -156,7 +156,7 @@ Some helper functions used in buildPdPat0Table
 >     | otherwise = 
 >         let 
 >             all_sofar_states = acc_states ++ curr_states
->             new_delta = [ (s, l, sfs) | s <- curr_states, l <- sig, let sfs = pdPat0 s l]
+>             new_delta = [ (s, l, sfs) | s <- curr_states, l <- sig, let sfs = pdPat0Sim s l]
 >             new_states = all_sofar_states `seq` D.nub [ s' | (_,_,sfs) <- new_delta, (s',f) <- sfs
 >                                                       , not (s' `D.isIn` dict) ]
 >             acc_delta_next  = (acc_delta ++ new_delta)
@@ -259,7 +259,7 @@ Some helper functions used in buildPdPat0Table
 >     Left err -> Left ("parseRegex for Text.Regex.PDeriv.ByteString failed:"++show err)
 >     Right pat -> Right (patToRegex pat compOpt execOpt)
 >     where 
->       patToRegex p _ _ = Regex (compilePat p)
+>       patToRegex p _ _ = Regex (compilePat $ simplify p)
 
 
 
@@ -275,14 +275,15 @@ Some helper functions used in buildPdPat0Table
 >  case greedyPatMatchCompiled r bs of
 >    Nothing -> Right (Nothing)
 >    Just env ->
->      let pre = case lookup (-1) env of { Just w -> w ; Nothing -> S.empty }
->          post = case lookup (-2) env of { Just w -> w ; Nothing -> S.empty }
->          full_len = S.length bs
+>      let pre = case lookup preBinder env of { Just w -> w ; Nothing -> S.empty }
+>          post = case lookup subBinder env of { Just w -> w ; Nothing -> S.empty }
+>          {- full_len = S.length bs
 >          pre_len = S.length pre
 >          post_len = S.length post
 >          main_len = full_len - pre_len - post_len
 >          main_and_post = S.drop pre_len bs
->          main = main_and_post `seq` main_len `seq` S.take main_len main_and_post
+>          main = main_and_post `seq` main_len `seq` S.take main_len main_and_post -}
+>          main = case lookup mainBinder env of { Just w -> w ; Nothing -> S.empty }
 >          matched = map snd (filter (\(v,w) -> v > 0) env)
 >      in Right (Just (pre,main,post,matched))
 

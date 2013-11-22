@@ -1,14 +1,22 @@
+> {-# LANGUAGE BangPatterns #-}
 > -- | this module contains the defs of common data types and type classes
 > module Text.Regex.PDeriv.Common 
->     ( Range
+>     ( Range(..), range, minRange, maxRange
 >     , Letter
->     , IsEmpty (..)
+>     , PosEpsilon (..)
+>     , IsEpsilon (..)
+>     , IsPhi (..)
+>     , Simplifiable (..)
 >     , my_hash
 >     , my_lookup
 >     , GFlag (..)
 >     , IsGreedy (..)
 >     , nub2
 >     , nub3
+>     , preBinder
+>     , preBinder_
+>     , subBinder
+>     , mainBinder
 >     ) where
 
 > import Data.Char (ord)
@@ -17,12 +25,36 @@
 > import Data.List (nubBy)
 
 > -- | (sub)words represent by range
-> type Range  = (Int,Int)      
+> -- type Range  = (Int,Int)      
+> data Range = Range !Int !Int deriving Show
+
+> instance Eq Range where
+>   (==) (Range x y) (Range w z) = (x == w) && (y == z)
+
+> range :: Int -> Int -> Range
+> range = Range
+
+> minRange = fst
+> maxRange = snd
+
 > -- | a character and its index (position)
 > type Letter = (Char,Int)     
 
-> class IsEmpty a where
->     isEmpty :: a -> Bool
+> -- | test for 'epsilon \in a' epsilon-possession
+> class PosEpsilon a where
+>     posEpsilon :: a -> Bool
+
+> -- | test for epsilon == a
+> class IsEpsilon a where
+>     isEpsilon :: a -> Bool
+
+> -- | test for \phi == a
+> class IsPhi a where
+>     isPhi :: a -> Bool
+
+> class Simplifiable a where
+>     simplify :: a -> a
+
 
 > my_hash :: Int -> Char -> Int
 > my_hash i x = (ord x) + 256 * i
@@ -97,7 +129,7 @@ the lookup function
 > nub3subsimple im [ x ] = [ x ]
 > nub3subsimple im (x@(k,f,0):xs) = x:(nub3subsimple im xs)
 > nub3subsimple im (x@(k,f,1):xs) = let im' = IM.insert k () im
->                                   in x:(nub3subsimple im' xs)
+>                                   in im' `seq` x:(nub3subsimple im' xs)
 > nub3subsimple im (x@(k,f,n):xs) = case IM.lookup k im of 
 >                                   Just _ -> nub3subsimple im xs
 >                                   Nothing -> let im' = IM.insert k () im
@@ -122,4 +154,21 @@ the lookup function
 >                                               Nothing -> (im', x:xs')
 
 
+The smallest binder index capturing the prefix of the unanchored regex
 
+> preBinder :: Int
+> preBinder = -1
+
+> preBinder_ :: Int
+> preBinder_ = -2
+
+The largest binder index capturing for the suffix of the unanchored regex
+
+> subBinder :: Int
+> subBinder = 2147483647
+
+
+The binder index capturing substring which matches by the unanchored regex
+
+> mainBinder :: Int
+> mainBinder = 0

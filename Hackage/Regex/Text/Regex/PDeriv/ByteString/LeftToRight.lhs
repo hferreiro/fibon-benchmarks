@@ -34,8 +34,8 @@ an emptiable pattern and the input word is fully consumed.
 
 > import Text.Regex.PDeriv.RE
 > import Text.Regex.PDeriv.Pretty (Pretty(..))
-> import Text.Regex.PDeriv.Common (Range, Letter, IsEmpty(..), my_hash, my_lookup, GFlag(..), IsEmpty(..), nub2)
-> import Text.Regex.PDeriv.IntPattern (Pat(..), pdPat, pdPat0, toBinder, Binder(..), strip, listifyBinder)
+> import Text.Regex.PDeriv.Common (Range(..), Letter, PosEpsilon(..), Simplifiable(..), my_hash, my_lookup, GFlag(..), nub2, preBinder, mainBinder, subBinder)
+> import Text.Regex.PDeriv.IntPattern (Pat(..), pdPat, pdPat0, pdPat0Sim, toBinder, Binder(..), strip, listifyBinder)
 > import Text.Regex.PDeriv.Parse
 > import qualified Text.Regex.PDeriv.Dictionary as D (Dictionary(..), Key(..), insertNotOverwrite, lookupAll, empty, isIn, nub)
 
@@ -51,8 +51,8 @@ A word is a byte string.
 
 > type Env = [(Int,Word)]
 
-> rg_collect :: S.ByteString -> (Int,Int) -> S.ByteString
-> rg_collect w (i,j) = S.take (j' - i' + 1) (S.drop i' w)
+> rg_collect :: S.ByteString -> Range -> S.ByteString
+> rg_collect w (Range i j) = S.take (j' - i' + 1) (S.drop i' w)
 >	       where i' = fromIntegral i
 >	             j' = fromIntegral j
 
@@ -71,7 +71,7 @@ A function that builds the above table from the pattern
 >     let sig = map (\x -> (x,0)) (sigmaRE (strip init))         -- the sigma
 >         init_dict = D.insertNotOverwrite (D.hash init) (init,0) D.empty         -- add init into the initial dictionary
 >         (all, delta, dictionary) = sig `seq` builder sig [] [] [init] init_dict 1   -- all states and delta
->         final = all `seq`  [ s | s <- all, isEmpty (strip s)]                   -- the final states
+>         final = all `seq`  [ s | s <- all, posEpsilon (strip s)]                   -- the final states
 >         sfinal = final `seq` dictionary `seq` map (mapping dictionary) final
 >         lists = [ (i,l,jfs) | 
 >                   (p,l, qfs) <- delta, 
@@ -312,7 +312,7 @@ Compilation
 >     Left err -> Left ("parseRegex for Text.Regex.PDeriv.ByteString failed:"++show err)
 >     Right pat -> Right (patToRegex pat compOpt execOpt)
 >     where 
->       patToRegex p _ _ = Regex (compilePat p)
+>       patToRegex p _ _ = Regex (compilePat $ simplify p)
 
 
 
@@ -328,14 +328,15 @@ Compilation
 >  case greedyPatMatchCompiled r bs of
 >    Nothing -> Right (Nothing)
 >    Just env ->
->      let pre = case lookup (-1) env of { Just w -> w ; Nothing -> S.empty }
->          post = case lookup (-2) env of { Just w -> w ; Nothing -> S.empty }
->          full_len = S.length bs
+>      let pre = case lookup preBinder env of { Just w -> w ; Nothing -> S.empty }
+>          post = case lookup subBinder env of { Just w -> w ; Nothing -> S.empty }
+>          {- full_len = S.length bs
 >          pre_len = S.length pre
 >          post_len = S.length post
 >          main_len = full_len - pre_len - post_len
 >          main_and_post = S.drop pre_len bs
->          main = main_and_post `seq` main_len `seq` S.take main_len main_and_post
+>          main = main_and_post `seq` main_len `seq` S.take main_len main_and_post -}
+>          main = case lookup mainBinder env of { Just w -> w ; Nothing -> S.empty }
 >          matched = map snd (filter (\(v,w) -> v > 0) env)
 >      in Right (Just (pre,main,post,matched))
 

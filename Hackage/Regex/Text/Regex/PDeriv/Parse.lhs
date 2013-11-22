@@ -1,5 +1,5 @@
 > {-# LANGUAGE FlexibleContexts #-}
-> module Text.Regex.PDeriv.Parse (parsePat) where
+> module Text.Regex.PDeriv.Parse (parsePat, parsePatPosix) where
 
 > {- By Kenny Zhuo Ming Lu and Martin Sulzmann, 2009. BSD3 -}
 
@@ -7,18 +7,20 @@ The parser that parse POSIX style regex syntax and translate it into our
 internal pattern representation.
 This parser is largely adapted from Text.Regex.TDFA.ReadRegex
 
+> import Data.Char
 > import Text.ParserCombinators.Parsec((<|>), (<?>),
 >                                      unexpected, try, runParser, many, getState, setState, CharParser, ParseError,
 >                                      sepBy1, option, notFollowedBy, many1, lookAhead, eof, between,
->                                      string, noneOf, digit, char, anyChar)
+>                                      string, oneOf, noneOf, digit, char, anyChar)
 > import Control.Monad(liftM, when, guard)
 > import Data.List (sort,nub)
+> import qualified Data.IntMap as IM
 > import qualified Data.ByteString.Char8 as S
 
 > import Text.Regex.PDeriv.ExtPattern (EPat(..))
 > import Text.Regex.PDeriv.IntPattern (Pat(..))
 > import Text.Regex.PDeriv.RE (RE(..))
-> import Text.Regex.PDeriv.Translate (translate) 
+> import Text.Regex.PDeriv.Translate (translate, translatePosix) 
 
 > type EState = ()
 > initEState = ()
@@ -36,6 +38,15 @@ This parser is largely adapted from Text.Regex.TDFA.ReadRegex
 >              { Left error -> Left error
 >              ; Right (epat, estate) -> Right (translate epat)
 >              }
+
+posix pattern parsing: we need to add binders everywhere
+
+> parsePatPosix :: String -> Either ParseError (Pat,IM.IntMap ())
+> parsePatPosix x = case parseEPat x of
+>                   { Left error -> Left error
+>                   ; Right (epat, estate) -> Right (translatePosix epat)
+>                   }
+
 
 > p_ere :: CharParser EState EPat
 > p_ere = liftM EOr $ sepBy1 p_branch (char '|')
@@ -57,7 +68,24 @@ todo '{'
 >          p_esc_char <|>
 >          p_char
 
-> p_group = liftM EGroup $ between (char '(') (char ')') p_ere
+ p_group = liftM EGroup $ between (char '(') (char ')') p_ere
+
+> p_group = 
+>     between (char '(') (char ')') 
+>                 ( try 
+>                   ( do  
+>                     { -- non marking group 
+>                     ; (char '?') 
+>                     ; (char ':')
+>                     ; x <- p_ere
+>                     ; return (EGroupNonMarking x)
+>                     } 
+>                   )
+>                  <|>
+>                  liftM EGroup p_ere
+>                 )
+
+
 
 parsing [ ... ] and [^ ... ]
 
@@ -84,15 +112,15 @@ todo: support the locale collating char class [: :] [= =] [. .]
 
 > p_one_enum = p_range <|> p_char_set 
 
-> p_range = try $ do  -- try is like atomically?
->           { start <- noneOf "]-"
+> p_range = try $ do  
+>           { start <- (try p_esc_char_) <|> noneOf "]-"
 >           ; char '-'
->           ; end <- noneOf "]"
+>           ; end <- (try p_esc_char_) <|> noneOf "]"
 >           ; return [ start .. end ] 
 >           }
 
 > p_char_set = do 
->   { c <- noneOf "]"
+>   { c <- (try p_esc_char_) <|> noneOf "]" -- <|> (char '\\' >> p_special_char)
 >   ; when (c == '-') $
 >     do -- when it is a dash, it must be at the end of the [..]
 >     { atEnd <- (lookAhead (char ']') >> return True) <|> (return False)
@@ -101,21 +129,50 @@ todo: support the locale collating char class [: :] [= =] [. .]
 >   ; return [c]
 >   }
 
-
 parse the dot (all characters)
 
 > p_dot = char '.' >> (return EDot)
 
 parse the escaped chars
 
-> p_esc_char = char '\\' >> anyChar >>= \c -> return (EEscape c)
+> p_esc_char_ = char '\\' >> ((try p_tab) <|> (try p_return) <|> (try p_newline) <|> (try p_oct_ascii) <|> anyChar)
+
+> p_esc_char = char '\\' >> ((try p_tab) <|> (try p_return) <|> (try p_newline) <|> (try p_oct_ascii) <|> anyChar) >>= \c -> return (EEscape c)
+
+oct ascii, e.g. \000
+
+> p_return = do 
+>            { char 'r'
+>            ; return '\r'
+>            }
+
+> p_newline = do 
+>             { char 'n'
+>             ; return '\n'
+>             }
+
+> p_tab = do 
+>         { char 't'
+>         ; return '\t'
+>         }
+
+
+> p_oct_ascii = do  
+>               { d1 <- digit
+>               ; d2 <- digit
+>               ; d3 <- digit
+>               ; return (chr ((digitToInt d2)*8 + (digitToInt d3)))
+>               }
+
 
 parse a single non-escaped char
 
+> specials = "^.[$()|*+?{\\"
+
 > p_char = noneOf specials >>= \c -> return (EChar c)
->     where specials = "^.[$()|*+?{\\"
 
-
+> p_special_char :: CharParser EState Char
+> p_special_char = oneOf specials
 
 
 > p_post_anchor_or_atom atom = 

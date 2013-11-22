@@ -1,6 +1,6 @@
 > {- By Kenny Zhuo Ming Lu and Martin Sulzmann, 2009, BSD License -}
 
-A bytestring implementation of reg exp pattern matching using partial derivative
+A string implementation of reg exp pattern matching using partial derivative
 This algorithm exploits the extension of partial derivative of regular expression patterns.
 This algorithm proceeds by scanning the input word from left to right until we reach 
 an emptiable pattern and the input word is fully consumed.
@@ -9,7 +9,7 @@ an emptiable pattern and the input word is fully consumed.
 >     FlexibleInstances, TypeSynonymInstances, FlexibleContexts, BangPatterns #-} 
 
 
-> module Text.Regex.PDeriv.ByteString.LeftToRightD
+> module Text.Regex.PDeriv.String.LeftToRightD
 >     ( Regex
 >     , CompOption(..)
 >     , ExecOption(..)
@@ -24,13 +24,10 @@ an emptiable pattern and the input word is fully consumed.
 > import Data.Char (ord)
 > -- import GHC.Int
 > import qualified Data.IntMap as IM
-> import qualified Data.ByteString.Char8 as S
-> import Control.DeepSeq
 
 > import System.IO.Unsafe (unsafePerformIO)
 
 > import Text.Regex.Base(RegexOptions(..))
-
 
 > import Text.Regex.PDeriv.RE
 > import Text.Regex.PDeriv.Pretty (Pretty(..))
@@ -40,10 +37,9 @@ an emptiable pattern and the input word is fully consumed.
 > import qualified Text.Regex.PDeriv.Dictionary as D (Dictionary(..), Key(..), insert, insertNotOverwrite, lookupAll, empty, isIn, nub)
 
 
-
 A word is a byte string.
 
-> type Word = S.ByteString
+> type Word = String
 
 
 ----------------------------
@@ -51,10 +47,8 @@ A word is a byte string.
 
 > type Env = [(Int,Word)]
 
- rg_collect :: S.ByteString -> (Int,Int) -> S.ByteString
-
-> rg_collect :: S.ByteString -> Range -> S.ByteString
-> rg_collect w (Range i j) = S.take (j' - i' + 1) (S.drop i' w)
+> rg_collect :: String -> Range -> String
+> rg_collect w (Range i j) = take (j' - i' + 1) (drop i' w)
 >	       where i' = fromIntegral i
 >	             j' = fromIntegral j
 
@@ -88,8 +82,7 @@ A function that builds the above table from the pattern
 >     in (hash_table, sfinal)
 
 
-                               
-
+                             
 Some helper functions used in buildPdPat0Table
 
 > mapping :: D.Dictionary (Pat,Int) -> Pat -> Int
@@ -267,13 +260,8 @@ collection function for binder
 >     collectPatMatchFromBinder_ w (listifyBinder b)
 
 > collectPatMatchFromBinder_ w [] = []
-> collectPatMatchFromBinder_ w ((x,[]):xs) = (x,S.empty):(collectPatMatchFromBinder_ w xs)
-> collectPatMatchFromBinder_ w ((x,rs):xs) = (x,foldl' S.append S.empty $ map (rg_collect w) (reverse rs)):(collectPatMatchFromBinder_ w xs)
-> {-
->                                            (x, f w rs):(collectPatMatchFromBinder_ w xs)
->     where f w [] = S.empty
->           f w (r:_) = rg_collect w r
-> -}
+> collectPatMatchFromBinder_ w ((x,[]):xs) = (x,""):(collectPatMatchFromBinder_ w xs)
+> collectPatMatchFromBinder_ w ((x,rs):xs) = (x,foldl' (++) "" $ map (rg_collect w) (reverse rs)):(collectPatMatchFromBinder_ w xs)
 
 
 orginally the type was Int -> DPat0Table -> Word -> (Int,[(Int,Binder)]) -> (Int, [(Int,Binder)])
@@ -283,13 +271,13 @@ or able to come out a smallish example)
 > patMatchesIntStatePdPat1 :: Int -> DPat0Table -> Word -> [(Int,Int,Binder)] -> [(Int,Int,Binder)]
 > patMatchesIntStatePdPat1 cnt dStateTable  w' [] = []
 > patMatchesIntStatePdPat1 cnt dStateTable  w' currNfaStateBinders =
->     case {-# SCC "uncons" #-} S.uncons w' of 
->       Nothing -> currNfaStateBinders -- we are done with the matching
->       Just (l,w) -> 
+>     case  w' of 
+>       [] -> currNfaStateBinders -- we are done with the matching
+>       (l:w) -> 
 >           let ((i,_,_):_) = currNfaStateBinders  -- i is the current DFA state
 >               k           =  l `seq` i `seq` my_hash i l
 >           in
->           case {- k `seq` -} IM.lookup k dStateTable of
+>           case IM.lookup k dStateTable of
 >             { Nothing -> [] -- "key missing" which means some letter exists in w but not in r.    
 >             ; Just (j,next_nfaStates,fDict) -> 
 >                 let 
@@ -316,30 +304,6 @@ fusing up the computation for binders
 >        k !a (_,!m,!b) = case IM.lookup m fDict of { Nothing -> a; Just !gs -> ((++) a $! (map (\g -> g cnt b) gs)) }  
 
 
-> {-
-
-general type scheme concatMapl :: (a -> [b]) -> [a] -> [b]
-
-
-> concatMapl :: ((Int,Int,Binder) -> [Binder]) -> [(Int,Int,Binder)] -> [Binder]
-> concatMapl f x = foldl' k [] x
->   where 
->       k a b = a `seq` b `seq` (++) a (f b) -- to make it stricter
-> -- same as k !a !b = (++) a (f b) 
-
-
-> 
-> foldl'rnf :: NFData a => (a -> b -> a) -> a -> [b] -> a
-> foldl'rnf f z xs = lgo z xs
->    where                      
->       lgo z []     = z      
->       lgo z (x:xs) = lgo z' xs 
->          where 
->             z' = f z x `using` rseq {- was 'rnf' in the realworld haskell book -}
-> 
-
-> -}
-
 > 
 > concatMap' :: (a -> [b]) -> [a] -> [b]
 > concatMap' f x = foldr' ( \ b a -> (++) a $! (f b) ) [] x
@@ -362,12 +326,8 @@ general type scheme concatMapl :: (a -> [b]) -> [a] -> [b]
 >     s = 0
 >     b = toBinder p
 >     allbinders' = b `seq` s `seq` dStateTable `seq` (patMatchesIntStatePdPat1 0 dStateTable w [(0,s,b)])
->     -- allbinders' = b `seq` s `seq` dStateTable `seq` (patMatchesIntStatePdPat1 0 dStateTable w [(s,b)]) 
 >     allbinders = allbinders' `seq` map third (filter (\(_,i,_) -> i `elem` sfinal) allbinders' )
->     -- all_func' = s `seq` pdStateTable `seq` (patMatchesIntStatePdPat0' 0 pdStateTable w [(s,[])])
->     -- all_func = all_func' `seq` map snd (filter (\(i,_) -> i `elem` sfinal) all_func' ) 
 >   in map (collectPatMatchFromBinder w) $! allbinders
->      -- map (\fs -> collectPatMatchFromBinder w (applyAll (reverse fs) b)) $! all_func 
 
 
 > greedyPatMatch' :: Pat -> Word -> Maybe Env
@@ -393,7 +353,6 @@ Compilation
 >     s = 0 
 >     e = [(0,0,b)]
 >     allbinders' = e `seq` b `seq` s `seq` dStateTable `seq` (patMatchesIntStatePdPat1 0 dStateTable w e ) 
->     -- allbinders' = b `seq` s `seq` dStateTable `seq` (patMatchesIntStatePdPat1 0 dStateTable w [(s,b)])
 >     allbinders = allbinders' `seq` map third (filter (\(_,i,_) -> i `elem` sfinal) allbinders' )
 >   in allbinders `seq` map (collectPatMatchFromBinder w) allbinders
 
@@ -409,8 +368,6 @@ Compilation
 
 
 
-
-
 > -- | The PDeriv backend spepcific 'Regex' type
 
 > newtype Regex = Regex (DPat0Table, [Int], Binder) 
@@ -420,10 +377,10 @@ Compilation
 
 > compile :: CompOption -- ^ Flags (summed together)
 >         -> ExecOption -- ^ Flags (summed together) 
->         -> S.ByteString -- ^ The regular expression to compile
+>         -> String -- ^ The regular expression to compile
 >         -> Either String Regex -- ^ Returns: the compiled regular expression
 > compile compOpt execOpt bs =
->     case parsePat (S.unpack bs) of
+>     case parsePat bs of
 >     Left err -> Left ("parseRegex for Text.Regex.PDeriv.ByteString failed:"++show err)
 >     Right pat -> Right (patToRegex pat compOpt execOpt)
 >     where 
@@ -432,26 +389,20 @@ Compilation
 
 
 > execute :: Regex      -- ^ Compiled regular expression
->        -> S.ByteString -- ^ ByteString to match against
+>        -> String -- ^ String to match against
 >        -> Either String (Maybe Env)
 > execute (Regex r) bs = Right (greedyPatMatchCompiled r bs)
 
 > regexec :: Regex      -- ^ Compiled regular expression
->        -> S.ByteString -- ^ ByteString to match against
->        -> Either String (Maybe (S.ByteString, S.ByteString, S.ByteString, [S.ByteString]))
+>        -> String -- ^ String to match against
+>        -> Either String (Maybe (String, String, String, [String]))
 > regexec (Regex r) bs = -- r `seq` Right Nothing
 >  case greedyPatMatchCompiled r bs of
 >    Nothing -> Right (Nothing)
 >    Just env ->
->      let pre = case lookup preBinder env of { Just w -> w ; Nothing -> S.empty }
->          post = case lookup subBinder env of { Just w -> w ; Nothing -> S.empty }
->          {- full_len = S.length bs
->          pre_len = S.length pre
->          post_len = S.length post
->          main_len = full_len - pre_len - post_len
->          main_and_post = S.drop pre_len bs
->          main = main_and_post `seq` main_len `seq` S.take main_len main_and_post -}
->          main = case lookup mainBinder env of { Just w -> w ; Nothing -> S.empty }
+>      let pre = case lookup preBinder env of { Just w -> w ; Nothing -> [] }
+>          post = case lookup subBinder env of { Just w -> w ; Nothing -> [] }
+>          main = case lookup mainBinder env of { Just w -> w ; Nothing -> [] }
 >          matched = map snd (filter (\(v,w) -> v > 0) env)
 >      in Right (Just (pre,main,post,matched))
 
@@ -497,60 +448,3 @@ Compilation
 >     getExecOpts r = undefined 
 
 
--- Kenny's example
-
-> long_pat = PPair (PVar 1 [] (PE (Star (L 'A') Greedy))) (PVar 2 [] (PE (Star (L 'A') Greedy)))
-> long_string n = S.pack $ (take 0 (repeat 'A')) ++ (take n (repeat 'B'))
-
--- p4 = << x : (A|<A,B>), y : (<B,<A,A>>|A) >, z : (<A,C>|C) > 
-
-> p4 = PPair (PPair p_x p_y) p_z
->    where p_x = PVar 1 [] (PE (Choice (L 'A') (Seq (L 'A') (L 'B')) Greedy))      
->          p_y = PVar 2 [] (PE (Choice (Seq (L 'B') (Seq (L 'A') (L 'A'))) (L 'A') Greedy))
->          p_z = PVar 3 [] (PE (Choice (Seq (L 'A') (L 'C')) (L 'C') Greedy))
-
-> input = S.pack "ABAAC"  -- long(posix) vs greedy match
-
-
-> p5 = PStar (PVar 1 [] (PE (Choice (L 'A') (Choice (L 'B') (L 'C') Greedy) Greedy))) Greedy
-
-pattern = ( x :: (A|C), y :: (B|()) )*
-
-> p6 = PStar (PPair (PVar 1 [] (PE (Choice (L 'A') (L 'C') Greedy))) (PVar 2 [] (PE (Choice (L 'B') Empty Greedy)))) Greedy
-
-pattern = ( x :: ( y :: A, z :: B )* )
-
-> p7 = PVar 1 [] (PStar (PPair (PVar 2 [] (PE (L 'A'))) (PVar 3 [] (PE (L 'B')))) Greedy)
-
-> input7 = S.pack "ABABAB"
-
-
-pattern = ( x :: A*?, y :: A*)
-
-> p8 = PPair (PVar 1 [] (PE (Star (L 'A') NotGreedy))) (PVar 2 [] (PE (Star (L 'A') Greedy)))
-
-> input8 = S.pack "AAAAAA"
-
-pattern = ( x :: A*?, y :: A*)
-
-> p9 = PPair (PStar (PVar 1 [] (PE (L 'A'))) NotGreedy) (PVar 2 [] (PE (Star (L 'A') Greedy)))
-
-pattern = ( x :: (A|B)*?, (y :: (B*,A*)))
-
-> p10 = PPair (PVar 1 [] (PE (Star (Choice (L 'A') (L 'B') Greedy) NotGreedy))) (PVar 2 [] (PE (Seq (Star (L 'B') Greedy) (Star (L 'A') Greedy))))
-
-> input10 = S.pack "ABA"
-
-
-pattern = <(x :: (0|...|9)+?)*, (y :: (0|...|9)+?)*, (z :: (0|...|9)+?)*>
-
-> digits_re = foldl' (\x y -> Choice x y Greedy) (L '0') (map L "123456789")
-
-> p11 = PPair (PStar (PVar 1 [] (PE (Seq digits_re (Star digits_re Greedy)))) Greedy) (PPair (PStar (PVar 2 [] (PE (Seq digits_re (Star digits_re Greedy)))) Greedy) (PPair (PStar (PVar 3 [] (PE (Seq digits_re (Star digits_re Greedy)))) Greedy) (PStar (PVar 4 [] (PE (Seq digits_re (Star digits_re Greedy)))) Greedy)))
-
-> input11 = S.pack "1234567890123456789-"
-
-
-> Right up34 = compile defaultCompOpt defaultExecOpt (S.pack "(Ab|cD)*")
-
-> s34 = S.pack "aBcD"
