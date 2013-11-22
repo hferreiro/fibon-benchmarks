@@ -1,5 +1,5 @@
 Name:                   TernaryTrees
-Version:                0.2.0.0
+Version:                0.2.0.2
 Category:               Data Structures
 Synopsis:               Efficient pure ternary tree Sets and Maps
 Description:            Ternary trees are an efficient structure often used for storing
@@ -20,7 +20,7 @@ Description:            Ternary trees are an efficient structure often used for 
 			.
 			New in this version:
 			.
-			* Added a StringMap type, which should be more efficient than using TernaryMap String a
+			* Fixed Other-Modules cabal entry so Internal files were added.
 			.
 			&#169; 2009 by Alex Mason (<http://random.axman6.com/blog/>). BSD3 license.
 			
@@ -35,6 +35,7 @@ Extra-Source-Files:
         Data/Map/StringMap.hs
         Data/Set/TernarySet.hs
         Data/Set/StringSet.hs
+        Data/Map/StringMap/Internal.hs
         Data/Set/StringSet/Internal.hs
         Data/Set/TernarySet/Internal.hs
         Data/Map/TernaryMap/Internal.hs
@@ -44,7 +45,15 @@ Library
         Build-Depends:
                 base >= 4.0.0.0, base < 5.0.0.0, binary >= 0.5.0.0
         Exposed-modules:
-                Data.Set.TernarySet, Data.Set.StringSet, Data.Map.TernaryMap, Data.Map.StringMap
+                Data.Set.TernarySet,
+                Data.Set.StringSet,
+                Data.Map.TernaryMap,
+                Data.Map.StringMap
+        Other-Modules:
+                Data.Map.TernaryMap.Internal,
+                Data.Set.TernarySet.Internal,
+                Data.Set.StringSet.Internal,
+                Data.Map.StringMap.Internal
 
 Executable TernaryTrees
   Main-Is:        Main.hs

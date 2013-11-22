@@ -15,7 +15,7 @@ module Data.Map.TernaryMap (
                 elems,
                 null
                 ) where
-import Data.Map.TernaryMap.Internal
+import Data.Map.TernaryMap.Internal (TernaryMap(..))
 import Data.Bits
 import Data.Binary
 import Control.Monad

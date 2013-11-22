@@ -7,6 +7,7 @@ module Data.Set.StringSet (
             fromList,
             null,
             elems,
+            empty,
             ) where
 import Data.Set.StringSet.Internal
 import Prelude hiding (null)
@@ -15,7 +16,7 @@ import Data.Binary
 import Control.Monad
 
 
--- | Inserts a new list of elements into a tree.
+-- | Inserts a new 'String' element into a tree.
 insert :: String -> StringSet -> StringSet
 insert xss@(_:_)  End              = singleton xss
 insert xss@(_:_)  (Null rest)      = Null $ insert xss rest
@@ -53,7 +54,7 @@ size End = 0
 size (Null rest) = 1 + size rest
 size (Node _ l e h) = size l + size e + size h
 
--- | Creates a new tree from a list of 'strings'
+-- | Creates a new tree from a list of 'Strings'
 fromList :: [String] -> StringSet
 fromList = foldl (flip insert) empty
 
@@ -77,59 +78,27 @@ null _   = False
 -- | A rather long Binary instance, that uses binary numbers to indicate
 -- where Ends are efficiently.
 instance Binary StringSet where
-    put (Node ch End End End) = do
-        putWord8 0
-        put ch
-    put (Node ch End End h) = do
-        putWord8 1
-        put ch
-        put h
-    put (Node ch End e End) = do
-        putWord8 2
-        put ch
-        put e
-    put (Node ch End e h) = do
-        putWord8 3
-        put ch
-        put e
-        put h
-    put (Node ch l End End) = do
-        putWord8 4
-        put ch
-        put l
-    put (Node ch l End h) = do
-        putWord8 5
-        put ch
-        put l
-        put h
-    put (Node ch l e End) = do
-        putWord8 6
-        put ch
-        put l
-        put e
-    -- General case
-    put (Node ch l e h) = do
-        putWord8 7
-        put ch
-        put l
-        put e
-        put h
-    put (Null End) = putWord8 8
-    put (Null rest) = do
-        putWord8 9
-        put rest
+    put (Node ch End End End)   = putWord8 0 >> put ch
+    put (Node ch End End h)     = putWord8 1 >> put ch >> put h
+    put (Node ch End e End)     = putWord8 2 >> put ch >> put e
+    put (Node ch End e h)       = putWord8 3 >> put ch >> put e >> put h
+    put (Node ch l End End)     = putWord8 4 >> put ch >> put l
+    put (Node ch l End h)       = putWord8 5 >> put ch >> put l >> put h
+    put (Node ch l e End)       = putWord8 6 >> put ch >> put l >> put e
+    put (Node ch l e h)         = putWord8 7 >> put ch >> put l >> put e >> put h
+    put (Null End)              = putWord8 8
+    put (Null rest)             = putWord8 9 >> put rest
     put End = putWord8 10
     
     get = do
         tag <- getWord8
         case tag of
-            _ | tag < 8 ->
-                do
-                    ch <- get
-                    l <- if tag `testBit` 2 then get else return End
-                    e <- if tag `testBit` 1 then get else return End
-                    h <- if tag `testBit` 0 then get else return End
-                    return (Node ch l e h)
+            _ | tag < 8 -> do
+                ch <- get
+                l <- if tag `testBit` 2 then get else return End
+                e <- if tag `testBit` 1 then get else return End
+                h <- if tag `testBit` 0 then get else return End
+                return (Node ch l e h)
             8 -> return (Null End)
             9 -> liftM Null get
             10 -> return End
