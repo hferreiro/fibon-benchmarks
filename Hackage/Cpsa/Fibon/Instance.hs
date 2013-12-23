@@ -22,12 +22,10 @@ mkInstance Test = sharedConfig {
         flagConfig = flgCfg {runFlags = ["ns.scm"]}
     }
 mkInstance Train = sharedConfig {
-        flagConfig   = flgCfg {runFlags = ["nsl5.lisp"]}
-      , output       = output sharedConfig ++ [(Stderr, Diff "cpsa.stderr.expected")]
-      , expectedExit = ExitFailure 1
+        flagConfig   = flgCfg {runFlags = ["pca.tst"]}
     }
 mkInstance Ref  = sharedConfig {
-        flagConfig   = flgCfg {runFlags = ["nsl5.lisp"]} -- '-r n' is ignored
+        flagConfig   = flgCfg {runFlags = ["nsl4cm1.lsp"]}
       , output       = output sharedConfig ++ [(Stderr, Diff "cpsa.stderr.expected")]
       , expectedExit = ExitFailure 1
     }
