@@ -3,5 +3,5 @@
 <quarter> ::= ["q" .x. "c"^25];
 <cent>    ::= ["c" .x. "c"];
 <money>   ::= [<nickel> | <dime> | <quarter> | <cent>]*;
-<drink>   ::= ["c"^50 .x. "PLONK"];
+<drink>   ::= ["c"^56 .x. "PLONK"];
 <main>    ::= [<money> .o. <drink>];
