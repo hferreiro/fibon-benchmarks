@@ -5,6 +5,8 @@ module Fibon.Benchmarks.Hackage.Fgl.Fibon.Instance(
 where
 import Fibon.BenchmarkInstance
 
+import Data.List ( sort )
+
 sharedConfig = BenchmarkInstance {
     flagConfig = FlagConfig {
         configureFlags = []
@@ -18,18 +20,20 @@ sharedConfig = BenchmarkInstance {
   }
 flgCfg = flagConfig sharedConfig
 trainGraphs = [
-            "le450_15a.col",
-            "le450_15b.col",
-            "le450_15c.col",
-            "le450_15d.col",
             "le450_25a.col",
             "le450_25b.col",
             "le450_25c.col",
-            "le450_25d.col",
-            "le450_5a.col",
-            "le450_5b.col",
-            "le450_5c.col",
-            "le450_5d.col"
+            "le450_25d.col"
+          ]
+refGraphs = [
+          "le450_15a.col",
+          "le450_15b.col",
+          "le450_15c.col",
+          "le450_15d.col",
+          "le450_5a.col",
+          "le450_5b.col",
+          "le450_5c.col",
+          "le450_5d.col"
           ]
 
 mkInstance Test = sharedConfig {
@@ -49,7 +53,7 @@ mkInstance Train = sharedConfig {
     }
 mkInstance Ref  = sharedConfig {
         flagConfig = flgCfg {
-          runFlags = ["-r", "30"] ++ trainGraphs
+          runFlags = sort (refGraphs ++ trainGraphs)
         }
     }
 
