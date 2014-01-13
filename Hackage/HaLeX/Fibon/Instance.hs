@@ -26,7 +26,7 @@ mkInstance Train = sharedConfig {
     flagConfig = flgCfg {runFlags = (runFlags flgCfg) ++ ["real"]}
   }
 mkInstance Ref  = sharedConfig {
-    flagConfig = flgCfg {runFlags = (runFlags flgCfg) ++ ["-r", "200", "real"]}
+    flagConfig = flgCfg {runFlags = (runFlags flgCfg) ++ ["real2"]}
   }
 
 
