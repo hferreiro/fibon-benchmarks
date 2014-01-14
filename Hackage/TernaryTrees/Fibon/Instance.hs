@@ -22,10 +22,10 @@ mkInstance Test = sharedConfig {
         flagConfig = flgCfg {runFlags = ["words", "theend.txt"]}
     }
 mkInstance Train = sharedConfig {
-        flagConfig = flgCfg {runFlags = ["words", "olivertwist.txt"]}
+        flagConfig = flgCfg {runFlags = ["-r", "10", "words", "olivertwist.txt"]}
     }
 mkInstance Ref  = sharedConfig {
-        flagConfig = flgCfg {runFlags = ["-r", "300", "words", "olivertwist.txt"]}
+        flagConfig = flgCfg {runFlags = ["-r", "25", "words", "olivertwist.txt"]}
     }
 
 
