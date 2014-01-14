@@ -2,7 +2,7 @@ This is simgi v0.3 (c) 2009-2010 Markus Dittrich
 
 -------- Simulation parameters ----------
 rng seed              : 1
-max time              : 15.0 s
+max time              : 5.0 s
 system volume         : nil
 data output frequency : 50000
 log output frequency  : 50000
@@ -23,26 +23,3 @@ iteration: 400000      --> time: 3.24300 s
 iteration: 450000      --> time: 3.91365 s
 iteration: 500000      --> time: 4.33638 s
 iteration: 550000      --> time: 4.65422 s
-iteration: 600000      --> time: 5.28954 s
-iteration: 650000      --> time: 5.37863 s
-iteration: 700000      --> time: 6.04938 s
-iteration: 750000      --> time: 6.66675 s
-iteration: 800000      --> time: 6.78198 s
-iteration: 850000      --> time: 7.44922 s
-iteration: 900000      --> time: 7.55017 s
-iteration: 950000      --> time: 8.16045 s
-iteration: 1000000     --> time: 8.77150 s
-iteration: 1050000     --> time: 8.88178 s
-iteration: 1100000     --> time: 9.54330 s
-iteration: 1150000     --> time: 9.66724 s
-iteration: 1200000     --> time: 10.30095 s
-iteration: 1250000     --> time: 10.93485 s
-iteration: 1300000     --> time: 11.02081 s
-iteration: 1350000     --> time: 11.67632 s
-iteration: 1400000     --> time: 11.85547 s
-iteration: 1450000     --> time: 12.40514 s
-iteration: 1500000     --> time: 13.06076 s
-iteration: 1550000     --> time: 13.14113 s
-iteration: 1600000     --> time: 13.80613 s
-iteration: 1650000     --> time: 14.02364 s
-iteration: 1700000     --> time: 14.51941 s

@@ -6,7 +6,7 @@
 ------------------------------------------------------}
 
 parameters
-  time         = 15.0
+  time         = 5.0
   outputBuffer = 50000
   outputFreq   = 50000
   systemVol    = nil  -- interpret rates as propensities
