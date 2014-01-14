@@ -25,6 +25,6 @@ mkInstance Train = sharedConfig {
         flagConfig = flgCfg {runFlags = ["-i", "pdbnt"]}
     }
 mkInstance Ref  = sharedConfig {
-        flagConfig = flgCfg {runFlags = ["-r", "90", "-i", "pdbnt"]}
+        flagConfig = flgCfg {runFlags = ["-i", "pdbnt"]}
     }
 
