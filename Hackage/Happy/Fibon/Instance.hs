@@ -17,7 +17,7 @@ sharedConfig = BenchmarkInstance {
     , exeName        = "Happy"
   }
 flgCfg = flagConfig sharedConfig
-trainFiles = ["Bio.y", "ErlParser.ly", "HaskellParser.y", "TestInput.y"]
+trainFiles = ["Bio.y", "CmmParse.y", "ErlParser.ly", "HaskellParser.y", "TestInput.y"]
 trainOutput = output sharedConfig ++ 
               [(OutputFile "TestInput.hs", Diff "TestInput.hs.expected")]
 
@@ -32,6 +32,6 @@ mkInstance Train = sharedConfig {
     , output     = trainOutput    
     }
 mkInstance Ref = sharedConfig {
-      flagConfig = flgCfg {runFlags = ["-r", "180"] ++ runFlags flgCfg ++ trainFiles}
+      flagConfig = flgCfg {runFlags = runFlags flgCfg ++ trainFiles}
     , output     = trainOutput    
     }
