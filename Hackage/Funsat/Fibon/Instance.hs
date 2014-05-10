@@ -22,9 +22,9 @@ mkInstance Test = sharedConfig {
         flagConfig = flgCfg {runFlags = ["ssa0432-003.cnf"]}
     }
 mkInstance Train = sharedConfig {
-        flagConfig = flgCfg {runFlags = ["hole8.cnf", "par16-5.cnf"]}
+        flagConfig = flgCfg {runFlags = ["hole8.cnf"]}
     }
 mkInstance Ref  = sharedConfig {
-        flagConfig = flgCfg {runFlags = ["-r", "14", "hole8.cnf", "par16-5.cnf"]}
+        flagConfig = flgCfg {runFlags = ["hole8.cnf", "par16-5.cnf"]}
     }
 
